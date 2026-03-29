@@ -1,0 +1,559 @@
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
+import { 
+  Plus, 
+  Search, 
+  Package, 
+  Trash2, 
+  Edit2, 
+  ChevronRight, 
+  Clock, 
+  TrendingUp, 
+  TrendingDown, 
+  Calculator, 
+  ArrowLeft,
+  PieChart,
+  FileText,
+  Download,
+  Settings,
+  X,
+  BookOpen
+} from 'lucide-react';
+import toast from 'react-hot-toast';
+import { Produto, Categoria, ProdutoIngrediente } from '../types';
+import { formatCurrency, calculateUnitCost, calculateProductPricing } from '../services/bakeryService';
+import { PieChart as RePieChart, Pie, Cell, ResponsiveContainer, Tooltip as ReTooltip } from 'recharts';
+import { ProductModal } from './Produtos/ProductModal';
+
+export const Produtos = () => {
+  const [produtos, setProdutos] = useState<Produto[]>([]);
+  const [categorias, setCategorias] = useState<Categoria[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedProduct, setSelectedProduct] = useState<Produto | null>(null);
+  const [showDetail, setShowDetail] = useState(false);
+  const [productIngredients, setProductIngredients] = useState<ProdutoIngrediente[]>([]);
+  const [showModal, setShowModal] = useState(false);
+  const [productToEdit, setProductToEdit] = useState<Produto | null>(null);
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    setLoading(true);
+    const [prodRes, catRes] = await Promise.all([
+      supabase.from('produtos').select('*').order('nome'),
+      supabase.from('categorias').select('*').order('nome')
+    ]);
+    
+    if (prodRes.error || catRes.error) {
+      toast.error('Erro ao carregar dados');
+    } else {
+      setProdutos(prodRes.data || []);
+      setCategorias(catRes.data || []);
+    }
+    setLoading(false);
+  };
+
+  const fetchProductIngredients = async (productId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('produto_ingredientes')
+        .select(`
+          *,
+          ingrediente:ingredientes!ingrediente_id(*)
+        `)
+        .eq('produto_id', productId);
+      
+      if (error) {
+        console.error('Erro ao carregar ficha técnica (join failure):', error);
+        // Fallback: try without join if join fails
+        const { data: simpleData, error: simpleError } = await supabase
+          .from('produto_ingredientes')
+          .select('*')
+          .eq('produto_id', productId);
+        
+        if (simpleError) {
+          console.error('Erro ao carregar ficha técnica (simple fetch failure):', simpleError);
+          toast.error('Erro ao carregar ficha técnica');
+        } else {
+          setProductIngredients(simpleData || []);
+        }
+      } else {
+        setProductIngredients(data || []);
+      }
+    } catch (err) {
+      console.error('Erro inesperado ao carregar ficha técnica:', err);
+      toast.error('Erro ao carregar ficha técnica');
+    }
+  };
+
+  const handleProductClick = async (product: Produto) => {
+    setSelectedProduct(product);
+    setShowDetail(true);
+    await fetchProductIngredients(product.id);
+  };
+
+  const handleAddProduct = () => {
+    setProductToEdit(null);
+    setShowModal(true);
+  };
+
+  const handleEditProduct = (e: React.MouseEvent, product: Produto) => {
+    e.stopPropagation();
+    setProductToEdit(product);
+    setShowModal(true);
+  };
+
+  const handleDeleteProduct = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    if (window.confirm('Tem certeza que deseja excluir este produto?')) {
+      const { error } = await supabase.from('produtos').delete().eq('id', id);
+      if (error) toast.error('Erro ao excluir produto');
+      else {
+        toast.success('Produto excluído');
+        fetchData();
+      }
+    }
+  };
+
+  const filteredProdutos = produtos.filter(p => 
+    p.nome.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const getCategoryName = (catId: string) => {
+    return categorias.find(c => c.id === catId)?.nome || 'Sem Categoria';
+  };
+
+  if (showDetail && selectedProduct) {
+    return (
+      <ProductDetail 
+        product={selectedProduct} 
+        ingredients={productIngredients} 
+        onBack={() => setShowDetail(false)} 
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-bold headline text-on-surface">Produtos</h1>
+          <p className="text-sm text-on-surface-variant">Gerencie seu catálogo de produtos e precificação</p>
+        </div>
+        <button 
+          onClick={handleAddProduct}
+          className="flex items-center gap-2 bg-primary text-white px-6 py-3 rounded-xl font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all"
+        >
+          <Plus size={20} /> Novo Produto
+        </button>
+      </div>
+
+      <div className="flex items-center gap-4 bg-surface-container-low px-4 py-3 rounded-xl border border-surface-container-high">
+        <Search size={20} className="text-on-surface-variant" />
+        <input 
+          type="text" 
+          placeholder="Buscar produtos..." 
+          className="bg-transparent border-none focus:ring-0 text-sm w-full"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        {filteredProdutos.map(produto => (
+          <div 
+            key={produto.id} 
+            onClick={() => handleProductClick(produto)}
+            className="bg-white rounded-2xl shadow-sm border border-surface-container-high hover:shadow-md transition-all group cursor-pointer overflow-hidden flex flex-col"
+          >
+            <div className="aspect-video bg-surface-container-low relative overflow-hidden">
+              {produto.imagem_url ? (
+                <img 
+                  src={produto.imagem_url} 
+                  alt={produto.nome} 
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-on-surface-variant/30">
+                  <Package size={48} />
+                </div>
+              )}
+              <div className="absolute top-3 right-3 px-2 py-1 bg-white/90 backdrop-blur-sm rounded-lg text-[10px] font-bold text-primary border border-primary/20">
+                {getCategoryName(produto.categoria_id)}
+              </div>
+              <div className="absolute top-3 left-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button 
+                  onClick={(e) => handleEditProduct(e, produto)}
+                  className="p-1.5 bg-white/90 backdrop-blur-sm rounded-lg text-on-surface-variant hover:text-primary border border-surface-container-high"
+                >
+                  <Edit2 size={14} />
+                </button>
+                <button 
+                  onClick={(e) => handleDeleteProduct(e, produto.id)}
+                  className="p-1.5 bg-white/90 backdrop-blur-sm rounded-lg text-on-surface-variant hover:text-error border border-surface-container-high"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
+            
+            <div className="p-5 flex-grow flex flex-col">
+              <h3 className="text-lg font-bold headline text-on-surface mb-1 truncate">{produto.nome}</h3>
+              <div className="flex items-center gap-2 text-[10px] text-on-surface-variant mb-4">
+                <Clock size={12} />
+                <span>{produto.tempo_producao_valor ? `${produto.tempo_producao_valor} ${produto.tempo_producao_unidade}` : '--'}</span>
+                <span className="mx-1">•</span>
+                <span>{produto.rendimento_unidades} un</span>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4 pt-4 border-t border-surface-container-high">
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Custo Unit.</span>
+                  <span className="text-sm font-bold text-on-surface">
+                    {formatCurrency(calculateUnitCost(produto.custo_total_calculado, produto.rendimento_unidades))}
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Preço Venda</span>
+                  <span className="text-lg font-bold text-primary">{formatCurrency(produto.preco_venda_final)}</span>
+                </div>
+              </div>
+              
+              <div className="mt-4 flex items-center justify-between">
+                <div className={`flex items-center gap-1 text-xs font-bold ${produto.margem_real_calculada >= 40 ? 'text-primary' : 'text-error'}`}>
+                  {produto.margem_real_calculada >= 40 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+                  <span>{produto.margem_real_calculada.toFixed(1)}% margem</span>
+                  {produto.usar_margem_categoria && (
+                    <span className="ml-1 text-[8px] px-1 bg-surface-container-high rounded text-on-surface-variant uppercase">Cat</span>
+                  )}
+                </div>
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleProductClick(produto);
+                  }}
+                  className="flex items-center gap-1 text-[10px] font-bold text-primary hover:underline"
+                >
+                  <BookOpen size={12} /> Ficha Técnica
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {filteredProdutos.length === 0 && !loading && (
+        <div className="text-center py-20 bg-surface-container-low rounded-3xl border-2 border-dashed border-surface-container-high">
+          <Package size={48} className="mx-auto text-on-surface-variant/30 mb-4" />
+          <p className="text-on-surface-variant">Nenhum produto encontrado.</p>
+        </div>
+      )}
+
+      {showModal && (
+        <ProductModal 
+          produto={productToEdit}
+          onClose={() => setShowModal(false)}
+          onSave={() => {
+            setShowModal(false);
+            fetchData();
+          }}
+        />
+      )}
+    </div>
+  );
+};
+
+const ProductDetail = ({ product, ingredients, onBack }: { product: Produto, ingredients: ProdutoIngrediente[], onBack: () => void }) => {
+  const unitCost = calculateUnitCost(product.custo_total_calculado, product.rendimento_unidades);
+  
+  const pieData = [
+    { name: 'Insumos', value: 65, color: '#2b6a57' },
+    { name: 'Mão de Obra', value: 25, color: '#6a4a2b' },
+    { name: 'Encargos', value: 10, color: '#efe0cd' },
+  ];
+
+  return (
+    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      {/* Header */}
+      <div className="flex justify-between items-center">
+        <button 
+          onClick={onBack}
+          className="flex items-center gap-2 text-on-surface-variant hover:text-primary transition-colors font-bold"
+        >
+          <ArrowLeft size={20} /> Voltar para lista
+        </button>
+        <div className="flex gap-3">
+          <button className="flex items-center gap-2 bg-surface-container-high text-on-surface px-4 py-2 rounded-xl font-bold hover:bg-surface-container-highest transition-all">
+            <Settings size={18} /> Configurar
+          </button>
+          <button className="flex items-center gap-2 bg-primary text-white px-6 py-2 rounded-xl font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all">
+            <Edit2 size={18} /> Editar Produto
+          </button>
+        </div>
+      </div>
+
+      {/* Hero Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Left: Product Image & Main Info */}
+        <div className="relative aspect-square lg:aspect-auto lg:h-[450px] rounded-3xl overflow-hidden shadow-2xl group">
+          {product.imagem_url ? (
+            <img 
+              src={product.imagem_url} 
+              alt={product.nome} 
+              className="w-full h-full object-cover"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <div className="w-full h-full bg-surface-container-low flex items-center justify-center text-on-surface-variant/20">
+              <Package size={120} />
+            </div>
+          )}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent flex flex-col justify-end p-8">
+            <span className="bg-primary text-white text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full w-fit mb-3">
+              Best Seller
+            </span>
+            <h1 className="text-4xl font-extrabold headline text-white mb-2 leading-tight">
+              {product.nome}
+            </h1>
+          </div>
+        </div>
+
+        {/* Right: Quick Stats & Pricing */}
+        <div className="flex flex-col gap-6">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-white p-6 rounded-2xl border border-surface-container-high shadow-sm">
+              <span className="text-[10px] uppercase font-bold text-on-surface-variant block mb-2">Tempo Total</span>
+              <div className="flex items-baseline gap-2">
+                <span className="text-3xl font-extrabold headline text-on-surface">{product.tempo_producao_valor || '--'}</span>
+                <span className="text-xs font-bold text-on-surface-variant uppercase">{product.tempo_producao_unidade || 'HORAS'}</span>
+              </div>
+              <p className="text-[10px] text-on-surface-variant mt-2 italic">Incluindo fermentação fria</p>
+            </div>
+            <div className="bg-white p-6 rounded-2xl border border-surface-container-high shadow-sm">
+              <span className="text-[10px] uppercase font-bold text-on-surface-variant block mb-2">Rendimento</span>
+              <div className="flex items-baseline gap-2">
+                <span className="text-3xl font-extrabold headline text-on-surface">{product.rendimento_unidades}</span>
+                <span className="text-xs font-bold text-on-surface-variant">UNIDADES</span>
+              </div>
+              <p className="text-[10px] text-on-surface-variant mt-2 italic">Aprox. {product.peso_final_produto}g por unidade</p>
+            </div>
+          </div>
+
+          <div className="bg-primary p-8 rounded-2xl shadow-xl shadow-primary/20 text-white relative overflow-hidden">
+            <div className="relative z-10">
+              <span className="text-[10px] uppercase font-bold opacity-70 block mb-2">Preço Sugerido</span>
+              <h2 className="text-5xl font-extrabold headline mb-2">{formatCurrency(product.preco_venda_final)}</h2>
+              <div className="flex items-center gap-2 bg-white/20 backdrop-blur-sm px-3 py-1 rounded-full w-fit">
+                <TrendingUp size={14} />
+                <span className="text-xs font-bold">
+                  Margem: {product.margem_real_calculada.toFixed(0)}% 
+                  ({product.usar_margem_categoria ? 'Categoria' : 'Manual'})
+                </span>
+              </div>
+            </div>
+            <Calculator className="absolute -right-8 -bottom-8 text-white/10 w-48 h-48 rotate-12" />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-surface-container-low p-4 rounded-2xl flex items-center gap-4 border border-surface-container-high">
+              <div className="p-2 bg-white rounded-lg text-primary shadow-sm">
+                <Calculator size={20} />
+              </div>
+              <div>
+                <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Peso da Massa</span>
+                <span className="text-lg font-bold text-on-surface">{(product.peso_final_produto * product.rendimento_unidades / 1000).toFixed(3)}kg</span>
+              </div>
+            </div>
+            <div className="bg-surface-container-low p-4 rounded-2xl flex items-center gap-4 border border-surface-container-high">
+              <div className="p-2 bg-white rounded-lg text-primary shadow-sm">
+                <TrendingUp size={20} />
+              </div>
+              <div>
+                <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Custo Unitário</span>
+                <span className="text-lg font-bold text-on-surface">{formatCurrency(unitCost)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* Left: Ingredients Table */}
+        <div className="lg:col-span-2 space-y-8">
+          <div className="bg-white rounded-3xl border border-surface-container-high shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-surface-container-high flex justify-between items-center bg-surface-container-low/30">
+              <div className="flex items-center gap-3">
+                <FileText className="text-primary" size={24} />
+                <h2 className="text-xl font-bold headline text-on-surface">Tabela de Insumos & Custos</h2>
+              </div>
+              <div className="flex gap-2">
+                <button className="p-2 hover:bg-surface-container-high rounded-lg text-on-surface-variant transition-all">
+                  <Download size={18} />
+                </button>
+                <button className="bg-primary text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-primary/90 transition-all">
+                  Editar Lista
+                </button>
+              </div>
+            </div>
+            
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-surface-container-low/10">
+                    <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Ingrediente</th>
+                    <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant text-center">Qtde.</th>
+                    <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant text-center">Unid.</th>
+                    <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant text-right">Custo Unit.</th>
+                    <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant text-right">Custo Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-surface-container-high">
+                  {ingredients.map((item) => (
+                    <tr key={item.id} className="hover:bg-surface-container-low/20 transition-colors">
+                      <td className="px-6 py-4 font-bold text-on-surface text-sm">{item.ingrediente?.nome}</td>
+                      <td className="px-6 py-4 text-center font-mono text-sm">{item.quantidade}</td>
+                      <td className="px-6 py-4 text-center">
+                        <span className="px-2 py-1 bg-surface-container-low rounded text-[10px] font-bold text-on-surface-variant">
+                          {item.unidade}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-right font-mono text-sm text-on-surface-variant">
+                        {formatCurrency(item.ingrediente?.preco_por_unidade_base || 0)}
+                      </td>
+                      <td className="px-6 py-4 text-right font-mono text-sm font-bold text-primary">
+                        {formatCurrency(item.custo_calculado)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-surface-container-low/30">
+                    <td colSpan={4} className="px-6 py-6 text-right text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
+                      Total Insumos
+                    </td>
+                    <td className="px-6 py-6 text-right text-2xl font-extrabold text-primary headline">
+                      {formatCurrency(product.custo_total_calculado)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+
+          {/* Modo de Preparo */}
+          <div className="bg-white rounded-3xl border border-surface-container-high shadow-sm p-8">
+            <div className="flex items-center gap-3 mb-8">
+              <div className="p-2 bg-primary-container/30 rounded-xl text-primary">
+                <Calculator size={24} />
+              </div>
+              <h2 className="text-2xl font-bold headline text-on-surface">Modo de Preparo</h2>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
+                  {product.modo_preparo ? (
+                    <div className="prose prose-sm max-w-none text-on-surface-variant">
+                      {product.modo_preparo.split('\n').map((step, i) => (
+                        <div key={i} className="flex gap-6 mb-8 group">
+                          <div className="flex-shrink-0 w-10 h-10 rounded-full bg-primary-container/20 text-primary flex items-center justify-center font-bold text-lg group-hover:bg-primary group-hover:text-white transition-all">
+                            {i + 1}
+                          </div>
+                          <div>
+                            <p className="leading-relaxed">{step}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-on-surface-variant italic">Nenhum modo de preparo cadastrado.</p>
+                  )}
+            </div>
+          </div>
+        </div>
+
+        {/* Right: Breakdown & Labor */}
+        <div className="space-y-8">
+          {/* Cost Composition */}
+          <div className="bg-white rounded-3xl border border-surface-container-high shadow-sm p-8">
+            <h3 className="text-sm font-bold uppercase tracking-widest text-on-surface-variant mb-8">Composição de Custos</h3>
+            <div className="h-64 w-full relative">
+              <ResponsiveContainer width="100%" height="100%">
+                <RePieChart>
+                  <Pie
+                    data={pieData}
+                    innerRadius={60}
+                    outerRadius={80}
+                    paddingAngle={8}
+                    dataKey="value"
+                  >
+                    {pieData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <ReTooltip />
+                </RePieChart>
+              </ResponsiveContainer>
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                <span className="text-3xl font-extrabold headline text-on-surface">100%</span>
+              </div>
+            </div>
+            
+            <div className="space-y-4 mt-8">
+              {pieData.map((item) => (
+                <div key={item.name} className="flex justify-between items-center">
+                  <div className="flex items-center gap-3">
+                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }}></div>
+                    <span className="text-xs font-bold text-on-surface-variant">{item.name} ({item.value}%)</span>
+                  </div>
+                  <span className="text-xs font-mono font-bold text-on-surface">
+                    {formatCurrency(product.custo_total_calculado ? (product.custo_total_calculado * item.value / 65) : 0)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Labor & Operation */}
+          <div className="bg-white rounded-3xl border border-surface-container-high shadow-sm p-8">
+            <h3 className="text-sm font-bold uppercase tracking-widest text-on-surface-variant mb-8">Mão de Obra & Operação</h3>
+            
+            <div className="space-y-6">
+              <div className="bg-surface-container-low p-5 rounded-2xl border border-surface-container-high">
+                <div className="flex justify-between items-start mb-4">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Mão de Obra Chef</span>
+                    <span className="text-lg font-bold text-on-surface">2.5 Horas</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Custo Est.</span>
+                    <span className="text-lg font-bold text-primary">R$ 51,09</span>
+                  </div>
+                </div>
+                <div className="w-full bg-surface-container-high h-1.5 rounded-full overflow-hidden">
+                  <div className="bg-primary h-full w-[65%]"></div>
+                </div>
+              </div>
+
+              <div className="bg-surface-container-low p-5 rounded-2xl border border-surface-container-high">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Encargos Fixos</span>
+                    <span className="text-lg font-bold text-on-surface">Taxa 12%</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Custo Est.</span>
+                    <span className="text-lg font-bold text-primary">R$ 20,43</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};

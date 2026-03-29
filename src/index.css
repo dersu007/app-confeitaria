@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-headline: "Plus Jakarta Sans", sans-serif;
+
+  --color-primary: #2b6a57;
+  --color-primary-dim: #1d5d4b;
+  --color-primary-container: #b0f0d8;
+  --color-on-primary-container: #1b5c4a;
+  
+  --color-secondary: #685e4f;
+  --color-secondary-container: #efe0cd;
+  
+  --color-surface: #faf9f8;
+  --color-surface-container-low: #f3f4f3;
+  --color-surface-container-high: #e7e8e7;
+  --color-surface-container-highest: #e1e3e2;
+  --color-surface-container-lowest: #ffffff;
+  
+  --color-on-surface: #303333;
+  --color-on-surface-variant: #5d605f;
+  
+  --color-error: #a83836;
+  --color-error-container: #fa746f;
+}
+
+@layer base {
+  body {
+    @apply bg-surface text-on-surface font-sans antialiased;
+  }
+  
+  h1, h2, h3, h4, .headline {
+    @apply font-headline;
+  }
+
+  button.bg-primary, 
+  .bg-primary button,
+  a.bg-primary,
+  .btn-primary {
+    @apply text-white;
+  }
+}
+
+.glass-nav {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(20px);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #e1e3e2;
+  border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #b0b2b1;
+}

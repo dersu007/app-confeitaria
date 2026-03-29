@@ -1,0 +1,206 @@
+import { Ingrediente, Produto, ProdutoIngrediente, Categoria, TipoMargem } from '../types';
+
+/**
+ * Business logic for bakery calculations
+ */
+
+export const convertToStandardUnit = (value: number, unit: string): number => {
+  const u = unit?.toLowerCase();
+  switch (u) {
+    case 'kg':
+    case 'l':
+      return value * 1000;
+    case 'g':
+    case 'ml':
+    case 'un':
+    default:
+      return value;
+  }
+};
+
+export const calculateIngredientUnitPrice = (precoEmbalagem: number, pesoEmbalagem: number, unidade: string): number => {
+  const pesoPadrao = convertToStandardUnit(pesoEmbalagem, unidade);
+  if (pesoPadrao <= 0) return 0;
+  const result = precoEmbalagem / pesoPadrao;
+  return Math.round((result + Number.EPSILON) * 10000) / 10000; // 4 decimal places for unit price
+};
+
+export const calculateRecipeIngredientCost = (quantidade: number, unidade: string, precoUnidadeBase: number): number => {
+  const qtdPadrao = convertToStandardUnit(quantidade, unidade);
+  const result = qtdPadrao * precoUnidadeBase;
+  return Math.round((result + Number.EPSILON) * 100) / 100;
+};
+
+export const resolveProductMargin = (produto: Partial<Produto>, categoria?: Categoria) => {
+  if (produto.usar_margem_categoria && categoria) {
+    return {
+      margem: categoria.margem_padrao,
+      tipo: categoria.tipo_margem
+    };
+  }
+  return {
+    margem: produto.margem_percentual || 0,
+    tipo: produto.margem_tipo || 'markup'
+  };
+};
+
+export const calculateProductPricing = (
+  custoTotal: number,
+  margemPercentual: number,
+  tipoMargem: TipoMargem,
+  usarPrecoManual: boolean,
+  precoVendaManual: number
+) => {
+  let precoVendaFinal = 0;
+  let margemRealCalculada = 0;
+
+  if (!usarPrecoManual) {
+    if (tipoMargem === 'markup') {
+      precoVendaFinal = custoTotal * (1 + margemPercentual / 100);
+    } else {
+      // Margem Real: Preço = Custo / (1 - Margem)
+      const margemDecimal = margemPercentual / 100;
+      if (margemDecimal >= 1) {
+        precoVendaFinal = custoTotal * 10; // Fallback for invalid margin
+      } else {
+        precoVendaFinal = custoTotal / (1 - margemDecimal);
+      }
+    }
+  } else {
+    precoVendaFinal = precoVendaManual;
+  }
+
+  // Rounding final price
+  precoVendaFinal = Math.round((precoVendaFinal + Number.EPSILON) * 100) / 100;
+
+  if (precoVendaFinal > 0) {
+    margemRealCalculada = ((precoVendaFinal - custoTotal) / precoVendaFinal) * 100;
+    margemRealCalculada = Math.round((margemRealCalculada + Number.EPSILON) * 100) / 100;
+  }
+
+  return {
+    precoVendaFinal,
+    margemRealCalculada
+  };
+};
+
+export const recalculateProduct = async (productId: string, supabase: any) => {
+  try {
+    // 1. Get product, its ingredients and its category
+    const { data: product, error: pErr } = await supabase
+      .from('produtos')
+      .select('*, categoria:categorias!categoria_id(*)')
+      .eq('id', productId)
+      .maybeSingle();
+      
+    if (pErr || !product) {
+      console.error('Erro ao buscar produto para recálculo:', pErr);
+      return null;
+    }
+
+    const { data: recipeItems, error: rErr } = await supabase
+      .from('produto_ingredientes')
+      .select('*, ingrediente:ingredientes!ingrediente_id(*)')
+      .eq('produto_id', productId);
+      
+    if (rErr || !recipeItems) {
+      console.error('Erro ao buscar ingredientes do produto para recálculo:', rErr);
+      return null;
+    }
+
+  // 2. Calculate total cost
+  let totalCost = 0;
+  const updatedRecipeItems = [];
+
+  for (const item of recipeItems) {
+    if (item.ingrediente) {
+      const itemCost = calculateRecipeIngredientCost(
+        item.quantidade,
+        item.unidade,
+        item.ingrediente.preco_por_unidade_base
+      );
+      totalCost += itemCost;
+      
+      // Update item cost if it changed
+      if (item.custo_calculado !== itemCost) {
+        updatedRecipeItems.push({ id: item.id, custo_calculado: itemCost });
+      }
+    }
+  }
+
+  totalCost = Math.round((totalCost + Number.EPSILON) * 100) / 100;
+
+  // 3. Update recipe items if needed
+  if (updatedRecipeItems.length > 0) {
+    for (const item of updatedRecipeItems) {
+      await supabase.from('produto_ingredientes').update({ custo_calculado: item.custo_calculado }).eq('id', item.id);
+    }
+  }
+
+  // 4. Calculate pricing
+  const unitCost = calculateUnitCost(totalCost, product.rendimento_unidades);
+  const activeMargin = resolveProductMargin(product, product.categoria);
+  
+  const { precoVendaFinal, margemRealCalculada } = calculateProductPricing(
+    unitCost,
+    activeMargin.margem,
+    activeMargin.tipo,
+    product.usar_preco_manual,
+    product.preco_venda_manual
+  );
+
+  // 5. Update product
+  const { data: updatedProduct, error: uErr } = await supabase.from('produtos').update({
+    custo_total_calculado: totalCost,
+    preco_venda_final: precoVendaFinal,
+    margem_real_calculada: margemRealCalculada
+  }).eq('id', productId).select().single();
+
+  if (uErr) {
+    console.error('Erro ao atualizar produto:', uErr);
+  }
+
+  } catch (err) {
+    console.error('Erro inesperado no recálculo do produto:', err);
+    return null;
+  }
+};
+
+export const recalculateAllProducts = async (supabase: any) => {
+  const { data: products } = await supabase.from('produtos').select('id');
+  if (!products) return;
+
+  for (const p of products) {
+    await recalculateProduct(p.id, supabase);
+  }
+};
+
+export const recalculateProductsUsingIngredient = async (ingredientId: string, supabase: any) => {
+  const { data: recipeItems } = await supabase
+    .from('produto_ingredientes')
+    .select('produto_id')
+    .eq('ingrediente_id', ingredientId);
+    
+  if (!recipeItems) return;
+
+  // Unique product IDs
+  const productIds = Array.from(new Set(recipeItems.map((item: any) => item.produto_id)));
+  
+  for (const productId of productIds) {
+    await recalculateProduct(productId as string, supabase);
+  }
+};
+
+export const calculateUnitCost = (custoTotal: number | undefined | null, rendimento: number | undefined | null): number => {
+  const c = custoTotal || 0;
+  const r = rendimento || 1;
+  if (r <= 0) return 0;
+  return c / r;
+};
+
+export const formatCurrency = (value: number) => {
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+  }).format(value);
+};
