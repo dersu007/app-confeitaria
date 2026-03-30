@@ -128,11 +128,38 @@ export const Produtos = () => {
 
   if (showDetail && selectedProduct) {
     return (
-      <ProductDetail 
-        product={selectedProduct} 
-        ingredients={productIngredients} 
-        onBack={() => setShowDetail(false)} 
-      />
+      <>
+        <ProductDetail 
+          product={selectedProduct} 
+          ingredients={productIngredients} 
+          onBack={() => setShowDetail(false)} 
+          onEdit={(product) => {
+            setProductToEdit(product);
+            setShowModal(true);
+          }}
+        />
+        {showModal && (
+          <ProductModal 
+            produto={productToEdit}
+            onClose={() => setShowModal(false)}
+            onSave={async () => {
+              setShowModal(false);
+              await fetchData();
+              
+              // Explicitly fetch the updated product to ensure UI is in sync
+              if (selectedProduct?.id) {
+                const { data } = await supabase
+                  .from('produtos')
+                  .select('*')
+                  .eq('id', selectedProduct.id)
+                  .single();
+                
+                if (data) setSelectedProduct(data);
+              }
+            }}
+          />
+        )}
+      </>
     );
   }
 
@@ -185,27 +212,13 @@ export const Produtos = () => {
               <div className="absolute top-3 right-3 px-2 py-1 bg-white/90 backdrop-blur-sm rounded-lg text-[10px] font-bold text-primary border border-primary/20">
                 {getCategoryName(produto.categoria_id)}
               </div>
-              <div className="absolute top-3 left-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button 
-                  onClick={(e) => handleEditProduct(e, produto)}
-                  className="p-1.5 bg-white/90 backdrop-blur-sm rounded-lg text-on-surface-variant hover:text-primary border border-surface-container-high"
-                >
-                  <Edit2 size={14} />
-                </button>
-                <button 
-                  onClick={(e) => handleDeleteProduct(e, produto.id)}
-                  className="p-1.5 bg-white/90 backdrop-blur-sm rounded-lg text-on-surface-variant hover:text-error border border-surface-container-high"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
             </div>
             
             <div className="p-5 flex-grow flex flex-col">
               <h3 className="text-lg font-bold headline text-on-surface mb-1 truncate">{produto.nome}</h3>
               <div className="flex items-center gap-2 text-[10px] text-on-surface-variant mb-4">
                 <Clock size={12} />
-                <span>{produto.tempo_producao_valor ? `${produto.tempo_producao_valor} ${produto.tempo_producao_unidade}` : '--'}</span>
+                <span>{produto.tempo_producao ? `${produto.tempo_producao} h` : '--'}</span>
                 <span className="mx-1">•</span>
                 <span>{produto.rendimento_unidades} un</span>
               </div>
@@ -214,7 +227,7 @@ export const Produtos = () => {
                 <div>
                   <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Custo Unit.</span>
                   <span className="text-sm font-bold text-on-surface">
-                    {formatCurrency(calculateUnitCost(produto.custo_total_calculado, produto.rendimento_unidades))}
+                    {formatCurrency(produto.custo_unitario || 0)}
                   </span>
                 </div>
                 <div className="text-right">
@@ -227,19 +240,10 @@ export const Produtos = () => {
                 <div className={`flex items-center gap-1 text-xs font-bold ${produto.margem_real_calculada >= 40 ? 'text-primary' : 'text-error'}`}>
                   {produto.margem_real_calculada >= 40 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
                   <span>{produto.margem_real_calculada.toFixed(1)}% margem</span>
-                  {produto.usar_margem_categoria && (
-                    <span className="ml-1 text-[8px] px-1 bg-surface-container-high rounded text-on-surface-variant uppercase">Cat</span>
-                  )}
                 </div>
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleProductClick(produto);
-                  }}
-                  className="flex items-center gap-1 text-[10px] font-bold text-primary hover:underline"
-                >
-                  <BookOpen size={12} /> Ficha Técnica
-                </button>
+                <div className="flex items-center gap-1 text-[10px] font-bold text-primary">
+                  <BookOpen size={12} /> Ver Detalhes
+                </div>
               </div>
             </div>
           </div>
@@ -257,9 +261,20 @@ export const Produtos = () => {
         <ProductModal 
           produto={productToEdit}
           onClose={() => setShowModal(false)}
-          onSave={() => {
+          onSave={async () => {
             setShowModal(false);
-            fetchData();
+            await fetchData();
+            
+            // If we are in detail view, refresh the selected product
+            if (showDetail && selectedProduct?.id) {
+              const { data } = await supabase
+                .from('produtos')
+                .select('*')
+                .eq('id', selectedProduct.id)
+                .single();
+              
+              if (data) setSelectedProduct(data);
+            }
           }}
         />
       )}
@@ -267,13 +282,17 @@ export const Produtos = () => {
   );
 };
 
-const ProductDetail = ({ product, ingredients, onBack }: { product: Produto, ingredients: ProdutoIngrediente[], onBack: () => void }) => {
-  const unitCost = calculateUnitCost(product.custo_total_calculado, product.rendimento_unidades);
+const ProductDetail = ({ product, ingredients, onBack, onEdit }: { product: Produto, ingredients: ProdutoIngrediente[], onBack: () => void, onEdit: (product: Produto) => void }) => {
+  const unitCost = product.custo_unitario || 0;
+  
+  const laborCost = product.custo_mao_obra || 0;
+  const fixedCost = product.custo_fixo_rateado || 0;
+  const ingredientsCost = Math.max(0, product.custo_total - laborCost - fixedCost);
   
   const pieData = [
-    { name: 'Insumos', value: 65, color: '#2b6a57' },
-    { name: 'Mão de Obra', value: 25, color: '#6a4a2b' },
-    { name: 'Encargos', value: 10, color: '#efe0cd' },
+    { name: 'Insumos', value: product.custo_total > 0 ? (ingredientsCost / product.custo_total) * 100 : 0, color: '#2b6a57' },
+    { name: 'Mão de Obra', value: product.custo_total > 0 ? (laborCost / product.custo_total) * 100 : 0, color: '#6a4a2b' },
+    { name: 'Custos Fixos', value: product.custo_total > 0 ? (fixedCost / product.custo_total) * 100 : 0, color: '#efe0cd' },
   ];
 
   return (
@@ -287,10 +306,16 @@ const ProductDetail = ({ product, ingredients, onBack }: { product: Produto, ing
           <ArrowLeft size={20} /> Voltar para lista
         </button>
         <div className="flex gap-3">
-          <button className="flex items-center gap-2 bg-surface-container-high text-on-surface px-4 py-2 rounded-xl font-bold hover:bg-surface-container-highest transition-all">
+          <button 
+            onClick={() => onEdit(product)}
+            className="flex items-center gap-2 bg-surface-container-high text-on-surface px-4 py-2 rounded-xl font-bold hover:bg-surface-container-highest transition-all"
+          >
             <Settings size={18} /> Configurar
           </button>
-          <button className="flex items-center gap-2 bg-primary text-white px-6 py-2 rounded-xl font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all">
+          <button 
+            onClick={() => onEdit(product)}
+            className="flex items-center gap-2 bg-primary text-white px-6 py-2 rounded-xl font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all"
+          >
             <Edit2 size={18} /> Editar Produto
           </button>
         </div>
@@ -328,8 +353,8 @@ const ProductDetail = ({ product, ingredients, onBack }: { product: Produto, ing
             <div className="bg-white p-6 rounded-2xl border border-surface-container-high shadow-sm">
               <span className="text-[10px] uppercase font-bold text-on-surface-variant block mb-2">Tempo Total</span>
               <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-extrabold headline text-on-surface">{product.tempo_producao_valor || '--'}</span>
-                <span className="text-xs font-bold text-on-surface-variant uppercase">{product.tempo_producao_unidade || 'HORAS'}</span>
+                <span className="text-3xl font-extrabold headline text-on-surface">{product.tempo_producao || '--'}</span>
+                <span className="text-xs font-bold text-on-surface-variant uppercase">HORAS</span>
               </div>
               <p className="text-[10px] text-on-surface-variant mt-2 italic">Incluindo fermentação fria</p>
             </div>
@@ -437,7 +462,7 @@ const ProductDetail = ({ product, ingredients, onBack }: { product: Produto, ing
                       Total Insumos
                     </td>
                     <td className="px-6 py-6 text-right text-2xl font-extrabold text-primary headline">
-                      {formatCurrency(product.custo_total_calculado)}
+                      {formatCurrency(ingredientsCost)}
                     </td>
                   </tr>
                 </tfoot>
@@ -507,10 +532,10 @@ const ProductDetail = ({ product, ingredients, onBack }: { product: Produto, ing
                 <div key={item.name} className="flex justify-between items-center">
                   <div className="flex items-center gap-3">
                     <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }}></div>
-                    <span className="text-xs font-bold text-on-surface-variant">{item.name} ({item.value}%)</span>
+                    <span className="text-xs font-bold text-on-surface-variant">{item.name} ({item.value.toFixed(1)}%)</span>
                   </div>
                   <span className="text-xs font-mono font-bold text-on-surface">
-                    {formatCurrency(product.custo_total_calculado ? (product.custo_total_calculado * item.value / 65) : 0)}
+                    {formatCurrency(product.custo_total ? (product.custo_total * item.value / 100) : 0)}
                   </span>
                 </div>
               ))}
@@ -525,28 +550,31 @@ const ProductDetail = ({ product, ingredients, onBack }: { product: Produto, ing
               <div className="bg-surface-container-low p-5 rounded-2xl border border-surface-container-high">
                 <div className="flex justify-between items-start mb-4">
                   <div>
-                    <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Mão de Obra Chef</span>
-                    <span className="text-lg font-bold text-on-surface">2.5 Horas</span>
+                    <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Mão de Obra</span>
+                    <span className="text-lg font-bold text-on-surface">{product.tempo_producao || 0} Horas</span>
                   </div>
                   <div className="text-right">
                     <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Custo Est.</span>
-                    <span className="text-lg font-bold text-primary">R$ 51,09</span>
+                    <span className="text-lg font-bold text-primary">{formatCurrency(laborCost)}</span>
                   </div>
                 </div>
                 <div className="w-full bg-surface-container-high h-1.5 rounded-full overflow-hidden">
-                  <div className="bg-primary h-full w-[65%]"></div>
+                  <div 
+                    className="bg-primary h-full transition-all duration-500" 
+                    style={{ width: `${product.custo_total > 0 ? (laborCost / product.custo_total) * 100 : 0}%` }}
+                  ></div>
                 </div>
               </div>
 
               <div className="bg-surface-container-low p-5 rounded-2xl border border-surface-container-high">
                 <div className="flex justify-between items-start">
                   <div>
-                    <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Encargos Fixos</span>
-                    <span className="text-lg font-bold text-on-surface">Taxa 12%</span>
+                    <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Custos Fixos (Rateio)</span>
+                    <span className="text-lg font-bold text-on-surface">Rateio</span>
                   </div>
                   <div className="text-right">
                     <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Custo Est.</span>
-                    <span className="text-lg font-bold text-primary">R$ 20,43</span>
+                    <span className="text-lg font-bold text-primary">{formatCurrency(fixedCost)}</span>
                   </div>
                 </div>
               </div>

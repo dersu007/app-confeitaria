@@ -293,14 +293,18 @@ export const FichaTecnica = ({ product: initialProduct, onClose, onUpdate }: Fic
         </div>
 
         <div className="p-6 border-t border-surface-container-high bg-surface-container-low flex justify-between items-center">
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-4">
             <div className="bg-white px-4 py-2 rounded-xl border border-surface-container-high shadow-sm">
-              <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Custo Total do Produto</span>
+              <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Total Insumos</span>
               <span className="text-xl font-bold text-primary">{formatCurrency(totalCost)}</span>
             </div>
             <div className="bg-white px-4 py-2 rounded-xl border border-surface-container-high shadow-sm">
-              <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Custo por Unidade ({currentProduct.rendimento_unidades})</span>
-              <span className="text-xl font-bold text-on-surface">{formatCurrency(totalCost / (currentProduct.rendimento_unidades || 1))}</span>
+              <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Custo Total (Final)</span>
+              <span className="text-xl font-bold text-on-surface">{formatCurrency(currentProduct.custo_total)}</span>
+            </div>
+            <div className="bg-white px-4 py-2 rounded-xl border border-surface-container-high shadow-sm">
+              <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Custo Unitário ({currentProduct.rendimento_unidades} un)</span>
+              <span className="text-xl font-bold text-on-surface">{formatCurrency(currentProduct.custo_unitario || 0)}</span>
             </div>
           </div>
           <button

@@ -154,6 +154,18 @@ export const recalculateProduct = async (productId: string, supabase: any) => {
     if (isNaN(totalCost)) totalCost = 0;
     totalCost = Math.round((totalCost + Number.EPSILON) * 100) / 100;
 
+    // 4. Calcular custos de mão de obra e fixos
+    // custo_mao_obra = tempo_producao × custo_hora_trabalho
+    const tempoProducao = Number(product.tempo_producao) || 0;
+    const custoHora = Number(product.custo_hora_trabalho) || 0;
+    const laborCost = tempoProducao * custoHora;
+    
+    // custo_fixo_rateado
+    const fixedCost = Number(product.custo_fixo_rateado) || 0;
+    
+    // Custo Total = Insumos + Mão de Obra + Custos Fixos
+    const fullTotalCost = totalCost + laborCost + fixedCost;
+
     // Atualizar itens da receita no banco
     if (updatedRecipeItems.length > 0) {
       for (const item of updatedRecipeItems) {
@@ -161,10 +173,10 @@ export const recalculateProduct = async (productId: string, supabase: any) => {
       }
     }
 
-    // 4. Calcular custo_unitario (usando rendimento_unidades)
-    const unitCost = calculateUnitCost(totalCost, product.rendimento_unidades);
+    // 5. Calcular custo_unitario (usando rendimento_unidades)
+    const unitCost = calculateUnitCost(fullTotalCost, product.rendimento_unidades);
 
-    // 5. Calcular preco_venda_final e margem_real_calculada
+    // 6. Calcular preco_venda_final e margem_real_calculada
     const activeMargin = resolveProductMargin(product, product.categoria);
     
     const { precoVendaFinal, margemRealCalculada } = calculateProductPricing(
@@ -178,13 +190,20 @@ export const recalculateProduct = async (productId: string, supabase: any) => {
       product.imposto_percentual || 0
     );
 
-    // 6. Atualizar produto com os novos valores calculados
-    const { data: updatedProduct, error: uErr } = await supabase.from('produtos').update({
-      custo_total_calculado: totalCost,
-      custo_unitario_snapshot: unitCost,
+    // 7. Atualizar produto com os novos valores calculados
+    const updateData = sanitizeProductUpdate({
+      custo_mao_obra: laborCost,
+      custo_fixo_rateado: fixedCost,
+      custo_total: fullTotalCost,
+      custo_unitario: unitCost,
       preco_venda_final: precoVendaFinal,
-      margem_real_calculada: margemRealCalculada
-    }).eq('id', productId).select().single();
+      margem_real_calculada: margemRealCalculada,
+      // Keep old names for compatibility if needed
+      custo_total_calculado: fullTotalCost,
+      custo_unitario_snapshot: unitCost
+    });
+
+    const { data: updatedProduct, error: uErr } = await supabase.from('produtos').update(updateData).eq('id', productId).select().single();
 
     if (uErr) {
       console.error('Erro ao atualizar produto após recálculo:', uErr);
@@ -235,4 +254,76 @@ export const formatCurrency = (value: number) => {
     style: 'currency',
     currency: 'BRL',
   }).format(value);
+};
+
+/**
+ * Sanitizes product update data to avoid "column not found" errors in Supabase.
+ * Only includes fields that are defined and potentially exist in the schema.
+ * Applies fallbacks for optional fields.
+ */
+export const sanitizeProductUpdate = (productData: any) => {
+  // Core fields that are expected to always exist
+  const coreFields = [
+    'nome',
+    'categoria_id',
+    'rendimento_unidades',
+    'tempo_producao',
+    'margem_percentual',
+    'usar_preco_manual',
+    'preco_venda_manual',
+    'margem_tipo',
+    'usar_margem_categoria',
+    'preco_venda_final',
+    'margem_real_calculada',
+    'peso_final_produto',
+    'modo_preparo',
+    'imagem_url'
+  ];
+
+  // Optional fields that might not exist in some schemas
+  const optionalFields = [
+    'custo_unitario_snapshot',
+    'custo_hora_trabalho',
+    'custo_mao_obra',
+    'custo_fixo_rateado',
+    'custo_total',
+    'custo_unitario',
+    'custo_total_calculado',
+    'custo_embalagem',
+    'taxa_venda_percentual',
+    'imposto_percentual'
+  ];
+
+  const sanitized: any = {};
+
+  // Apply fallbacks to the input data if needed
+  const dataWithFallbacks = { ...productData };
+  
+  if (dataWithFallbacks.imagem_url === '' || dataWithFallbacks.imagem_url === undefined) {
+    dataWithFallbacks.imagem_url = null;
+  }
+  
+  if (dataWithFallbacks.modo_preparo === undefined) {
+    dataWithFallbacks.modo_preparo = "";
+  }
+  
+  if (dataWithFallbacks.tempo_producao === undefined) {
+    dataWithFallbacks.tempo_producao = 0;
+  }
+
+  // Add core fields if they are defined
+  coreFields.forEach(field => {
+    if (dataWithFallbacks[field] !== undefined) {
+      sanitized[field] = dataWithFallbacks[field];
+    }
+  });
+
+  // Add optional fields only if they are defined
+  optionalFields.forEach(field => {
+    if (dataWithFallbacks[field] !== undefined) {
+      sanitized[field] = dataWithFallbacks[field];
+    }
+  });
+
+  return sanitized;
 };

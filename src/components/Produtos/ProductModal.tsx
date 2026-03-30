@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Produto, Categoria } from '../../types';
-import { X, Plus, Package, Image, Clock, Calculator, Save } from 'lucide-react';
+import { X, Plus, Package, Image, Clock, Calculator, Save, Weight, DollarSign } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { formatCurrency, calculateProductPricing, calculateUnitCost, resolveProductMargin } from '../../services/bakeryService';
+import { formatCurrency, calculateProductPricing, calculateUnitCost, resolveProductMargin, recalculateProduct, sanitizeProductUpdate } from '../../services/bakeryService';
 import { FichaTecnica } from '../FichaTecnica';
 
 interface ProductModalProps {
@@ -16,11 +16,12 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
   const [nome, setNome] = useState(produto?.nome || '');
   const [categoriaId, setCategoriaId] = useState(produto?.categoria_id || '');
   const [imagemUrl, setImagemUrl] = useState(produto?.imagem_url || '');
-  const [tempoProducaoValor, setTempoProducaoValor] = useState(produto?.tempo_producao_valor || 0);
-  const [tempoProducaoUnidade, setTempoProducaoUnidade] = useState<'horas' | 'dias'>(produto?.tempo_producao_unidade || 'horas');
+  const [tempoProducao, setTempoProducao] = useState(produto?.tempo_producao || 0);
   const [modoPreparo, setModoPreparo] = useState(produto?.modo_preparo || '');
   const [rendimentoUnidades, setRendimentoUnidades] = useState(produto?.rendimento_unidades || 1);
   const [pesoFinal, setPesoFinal] = useState(produto?.peso_final_produto || 0);
+  const [custoHoraTrabalho, setCustoHoraTrabalho] = useState(produto?.custo_hora_trabalho || 0);
+  const [custoFixoRateado, setCustoFixoRateado] = useState(produto?.custo_fixo_rateado || 0);
   
   const [usarPrecoManual, setUsarPrecoManual] = useState(produto?.usar_preco_manual || false);
   const [precoVendaManual, setPrecoVendaManual] = useState(produto?.preco_venda_manual || 0);
@@ -30,37 +31,38 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
 
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [showFichaTecnica, setShowFichaTecnica] = useState(false);
-  const [custoTotal, setCustoTotal] = useState(produto?.custo_total_calculado || 0);
+  const [custoInsumos, setCustoInsumos] = useState(0);
 
   useEffect(() => {
     fetchData();
-  }, []);
+    if (produto?.id) {
+      fetchIngredientsCost();
+    }
+  }, [produto]);
+
+  const fetchIngredientsCost = async () => {
+    const { data } = await supabase.from('produto_ingredientes').select('custo_calculado').eq('produto_id', produto?.id);
+    if (data) {
+      const total = data.reduce((acc, item) => acc + (item.custo_calculado || 0), 0);
+      setCustoInsumos(total);
+    }
+  };
 
   const fetchData = async () => {
     try {
       const { data, error } = await supabase.from('categorias').select('*').order('nome');
-      
-      if (error) {
-        console.error('Erro ao carregar categorias:', error);
-        // If it's a permission error or table doesn't exist, we still want to allow the user to proceed if possible
-        setCategorias([]);
-        return;
-      }
-
+      if (error) throw error;
       setCategorias(data || []);
-      
-      // If no categories exist, we might want to warn the user
-      if (!data || data.length === 0) {
-        console.warn('Nenhuma categoria encontrada. O usuário precisa cadastrar categorias na Base de Dados.');
-      }
     } catch (error: any) {
-      console.error('Erro detalhado no fetchData:', error);
-      // Don't block the UI with a toast if it's just a background fetch
+      console.error('Erro ao carregar categorias:', error);
       setCategorias([]);
     }
   };
 
-  const currentUnitCost = calculateUnitCost(custoTotal, rendimentoUnidades);
+  const laborCost = (Number(tempoProducao) || 0) * (Number(custoHoraTrabalho) || 0);
+  const fixedCost = Number(custoFixoRateado) || 0;
+  const fullTotalCost = custoInsumos + laborCost + fixedCost;
+  const currentUnitCost = calculateUnitCost(fullTotalCost, rendimentoUnidades);
   const selectedCategoria = categorias.find(c => c.id === categoriaId);
   
   const activeMargin = resolveProductMargin(
@@ -86,35 +88,61 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
     const loadingToast = toast.loading('Salvando produto...');
 
     try {
-        const productData = {
-          nome,
-          categoria_id: categoriaId,
-          imagem_url: imagemUrl,
-          tempo_producao_valor: tempoProducaoValor,
-          tempo_producao_unidade: tempoProducaoUnidade,
-          modo_preparo: modoPreparo,
-          rendimento_unidades: rendimentoUnidades,
-          peso_final_produto: pesoFinal,
-          custo_total_calculado: custoTotal,
-          custo_unitario_snapshot: currentUnitCost,
-          usar_preco_manual: usarPrecoManual,
-          preco_venda_manual: precoVendaManual,
-          usar_margem_categoria: usarMargemCategoria,
-          margem_percentual: margemPercentual,
-          margem_tipo: margemTipo,
-          preco_venda_final: precoVendaFinal,
-          margem_real_calculada: margemRealCalculada
-        };
+      const rawProductData = {
+        nome,
+        categoria_id: categoriaId,
+        imagem_url: imagemUrl,
+        tempo_producao: tempoProducao,
+        custo_hora_trabalho: custoHoraTrabalho,
+        custo_mao_obra: laborCost,
+        custo_fixo_rateado: custoFixoRateado,
+        modo_preparo: modoPreparo,
+        rendimento_unidades: rendimentoUnidades,
+        peso_final_produto: pesoFinal,
+        custo_total: fullTotalCost,
+        custo_unitario: currentUnitCost,
+        usar_preco_manual: usarPrecoManual,
+        preco_venda_manual: precoVendaManual,
+        usar_margem_categoria: usarMargemCategoria,
+        margem_percentual: margemPercentual,
+        margem_tipo: margemTipo,
+        preco_venda_final: precoVendaFinal,
+        margem_real_calculada: margemRealCalculada,
+        // Backwards compatibility
+        custo_total_calculado: fullTotalCost,
+        custo_unitario_snapshot: currentUnitCost
+      };
 
-      if (produto?.id) {
-        const { error } = await supabase.from('produtos').update(productData).eq('id', produto.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from('produtos').insert([productData]);
-        if (error) throw error;
+      const productData = sanitizeProductUpdate(rawProductData);
+      
+      // Log updateData for debugging as requested
+      console.log('Update Data:', productData);
+
+      if (Object.keys(productData).length === 0) {
+        throw new Error("O objeto de atualização está vazio.");
       }
 
+      let productId = produto?.id;
+
+      if (productId) {
+        // Ensure productId is valid before update
+        if (!productId) throw new Error("Produto sem ID para atualização");
+        
+        const { error } = await supabase.from('produtos').update(productData).eq('id', productId);
+        if (error) throw error;
+      } else {
+        const { data, error } = await supabase.from('produtos').insert([productData]).select();
+        if (error) throw error;
+        if (!data || data.length === 0) throw new Error("Erro ao inserir produto");
+        productId = data[0].id;
+      }
+
+      // Recalculate after save to ensure all totals are correct
+      await recalculateProduct(productId, supabase);
+
       toast.success('Produto salvo com sucesso!', { id: loadingToast });
+      
+      // Call onSave which handles refreshing the UI in the parent component
       onSave();
     } catch (error: any) {
       console.error('Erro ao salvar produto:', error);
@@ -176,24 +204,16 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest flex items-center gap-1.5">
-                    <Clock size={12} /> Tempo Produção
+                    <Clock size={12} /> Tempo Produção (horas)
                   </label>
                   <div className="flex gap-2">
                     <input 
                       type="number"
-                      value={tempoProducaoValor}
-                      onChange={e => setTempoProducaoValor(Number(e.target.value))}
+                      value={tempoProducao}
+                      onChange={e => setTempoProducao(Number(e.target.value))}
                       placeholder="0"
                       className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
                     />
-                    <select
-                      value={tempoProducaoUnidade}
-                      onChange={e => setTempoProducaoUnidade(e.target.value as 'horas' | 'dias')}
-                      className="bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 px-2"
-                    >
-                      <option value="horas">Horas</option>
-                      <option value="dias">Dias</option>
-                    </select>
                   </div>
                 </div>
                 <div className="space-y-1.5">
@@ -209,6 +229,43 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
                 </div>
               </div>
 
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest flex items-center gap-1.5">
+                    <Weight size={12} /> Peso Final (g)
+                  </label>
+                  <input 
+                    type="number"
+                    value={pesoFinal}
+                    onChange={e => setPesoFinal(Number(e.target.value))}
+                    className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest flex items-center gap-1.5">
+                    <DollarSign size={12} /> Custo Hora (R$)
+                  </label>
+                  <input 
+                    type="number"
+                    value={custoHoraTrabalho}
+                    onChange={e => setCustoHoraTrabalho(Number(e.target.value))}
+                    className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest flex items-center gap-1.5">
+                  <Calculator size={12} /> Rateio Custos Fixos (R$)
+                </label>
+                <input 
+                  type="number"
+                  value={custoFixoRateado}
+                  onChange={e => setCustoFixoRateado(Number(e.target.value))}
+                  className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+
               <div className="space-y-1.5">
                 <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest flex items-center gap-1.5">
                   <Image size={12} /> URL da Imagem
@@ -220,6 +277,16 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
                   placeholder="https://..."
                   className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
                 />
+                {imagemUrl && (
+                  <div className="mt-2 aspect-video w-full rounded-xl overflow-hidden border border-surface-container-high">
+                    <img 
+                      src={imagemUrl} 
+                      alt="Preview" 
+                      className="w-full h-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="space-y-1.5">
@@ -249,7 +316,7 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <span className="text-[10px] text-on-surface-variant block">Custo Total Insumos</span>
-                    <span className="text-sm font-bold text-on-surface">{formatCurrency(custoTotal)}</span>
+                    <span className="text-sm font-bold text-on-surface">{formatCurrency(custoInsumos)}</span>
                   </div>
                   <div>
                     <span className="text-[10px] text-on-surface-variant block">Custo Unitário</span>
@@ -397,8 +464,9 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
           onUpdate={() => {
             // Recalculate cost when ingredients change
             const fetchNewCost = async () => {
-              const { data } = await supabase.from('produtos').select('custo_total_calculado').eq('id', produto.id).single();
-              if (data) setCustoTotal(data.custo_total_calculado);
+              const { data } = await supabase.from('produtos').select('custo_total').eq('id', produto.id).single();
+              if (data) setCustoInsumos(data.custo_total - laborCost - fixedCost);
+              fetchIngredientsCost();
             };
             fetchNewCost();
           }}

@@ -25,8 +25,12 @@ export interface Produto {
   categoria_id: string;
   rendimento_unidades: number;
   peso_final_produto: number;
-  custo_total_calculado: number;
-  custo_unitario_snapshot?: number;
+  custo_total: number;
+  custo_unitario: number;
+  tempo_producao: number;
+  custo_hora_trabalho: number;
+  custo_mao_obra: number;
+  custo_fixo_rateado: number;
   usar_margem_categoria: boolean;
   margem_tipo?: TipoMargem;
   margem_percentual?: number;
@@ -38,10 +42,14 @@ export interface Produto {
   taxa_venda_percentual?: number;
   imposto_percentual?: number;
   imagem_url?: string;
-  tempo_producao_valor?: number;
-  tempo_producao_unidade?: 'horas' | 'dias';
   modo_preparo?: string;
   ingredientes?: ProdutoIngrediente[];
+  // Keep old names for compatibility if needed, but user said "assume it has these fields"
+  custo_total_calculado?: number;
+  custo_unitario_snapshot?: number;
+  tempo_producao_valor?: number;
+  tempo_producao_unidade?: 'horas' | 'dias';
+  rateio_despesas_fixas?: number;
 }
 
 export interface ProdutoIngrediente {
