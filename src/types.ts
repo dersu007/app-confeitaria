@@ -34,6 +34,9 @@ export interface Produto {
   usar_preco_manual: boolean;
   preco_venda_final: number;
   margem_real_calculada: number;
+  custo_embalagem?: number;
+  taxa_venda_percentual?: number;
+  imposto_percentual?: number;
   imagem_url?: string;
   tempo_producao_valor?: number;
   tempo_producao_unidade?: 'horas' | 'dias';

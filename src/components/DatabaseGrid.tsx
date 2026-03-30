@@ -84,7 +84,8 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
       'peso_embalagem', 'preco_embalagem', 'preco_por_unidade_base',
       'tempo_producao_valor', 'rendimento_unidades', 'preco_venda_manual',
       'margem_percentual', 'custo_total_calculado', 'quantidade',
-      'margem_padrao', 'valor_mensal'
+      'margem_padrao', 'valor_mensal', 'custo_embalagem', 
+      'taxa_venda_percentual', 'imposto_percentual'
     ];
 
     const booleanFields = ['usar_margem_categoria', 'usar_preco_manual'];
@@ -149,7 +150,8 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
       } else if (table === 'produtos' && [
         'categoria_id', 'usar_margem_categoria', 'margem_percentual', 
         'margem_tipo', 'usar_preco_manual', 'preco_venda_manual', 
-        'rendimento_unidades', 'tempo_producao_unidade'
+        'rendimento_unidades', 'tempo_producao_unidade',
+        'custo_embalagem', 'taxa_venda_percentual', 'imposto_percentual'
       ].includes(columnId)) {
         try {
           const updatedProduct = await recalculateProduct(row.id, supabase);
@@ -189,7 +191,8 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
           'nome', 'descricao', 'categoria_id', 'rendimento_unidades', 
           'tempo_producao_valor', 'tempo_producao_unidade', 
           'usar_margem_categoria', 'margem_percentual', 'margem_tipo', 
-          'usar_preco_manual', 'preco_venda_manual', 'user_id'
+          'usar_preco_manual', 'preco_venda_manual', 'user_id',
+          'custo_embalagem', 'taxa_venda_percentual', 'imposto_percentual'
         ];
       case 'categorias':
         return ['nome', 'margem_padrao', 'tipo_margem', 'user_id'];

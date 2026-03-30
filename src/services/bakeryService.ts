@@ -58,25 +58,31 @@ export const resolveProductMargin = (produto: Partial<Produto>, categoria?: Cate
 };
 
 export const calculateProductPricing = (
-  custoTotal: number,
+  custoProducao: number,
   margemPercentual: number,
   tipoMargem: TipoMargem,
   usarPrecoManual: boolean,
-  precoVendaManual: number
+  precoVendaManual: number,
+  custoEmbalagem: number = 0,
+  taxaVendaPercentual: number = 0,
+  impostoPercentual: number = 0
 ) => {
   let precoVendaFinal = 0;
-  let margemRealCalculada = 0;
+  const custoTotalBase = custoProducao + custoEmbalagem;
+  const taxasImpostosTotal = taxaVendaPercentual + impostoPercentual;
 
   if (!usarPrecoManual) {
     if (tipoMargem === 'markup') {
-      precoVendaFinal = custoTotal * (1 + margemPercentual / 100);
+      // Markup simples sobre o custo total (produção + embalagem)
+      precoVendaFinal = custoTotalBase * (1 + margemPercentual / 100);
     } else {
-      // Margem Real: Preço = Custo / (1 - Margem)
-      const margemDecimal = margemPercentual / 100;
-      if (margemDecimal >= 1) {
-        precoVendaFinal = custoTotal * 10; // Fallback for invalid margin
+      // Margem Real desejada (Profit Margin)
+      // Preço = Custo / (1 - (Margem % + Taxas % + Impostos %))
+      const divisor = 1 - (margemPercentual + taxasImpostosTotal) / 100;
+      if (divisor <= 0.05) { // Proteção contra divisão por zero ou margens impossíveis
+        precoVendaFinal = custoTotalBase * 5; 
       } else {
-        precoVendaFinal = custoTotal / (1 - margemDecimal);
+        precoVendaFinal = custoTotalBase / divisor;
       }
     }
   } else {
@@ -86,8 +92,11 @@ export const calculateProductPricing = (
   // Rounding final price
   precoVendaFinal = Math.round((precoVendaFinal + Number.EPSILON) * 100) / 100;
 
+  let margemRealCalculada = 0;
   if (precoVendaFinal > 0) {
-    margemRealCalculada = ((precoVendaFinal - custoTotal) / precoVendaFinal) * 100;
+    // Margem Real % = ((Preço Venda - (Custo Produção + Custo Embalagem) - (Preço Venda * (Taxas + Impostos) / 100)) / Preço Venda) * 100
+    const deducaoTaxas = precoVendaFinal * (taxasImpostosTotal / 100);
+    margemRealCalculada = ((precoVendaFinal - custoTotalBase - deducaoTaxas) / precoVendaFinal) * 100;
     margemRealCalculada = Math.round((margemRealCalculada + Number.EPSILON) * 100) / 100;
   }
 
@@ -163,7 +172,10 @@ export const recalculateProduct = async (productId: string, supabase: any) => {
       activeMargin.margem,
       activeMargin.tipo,
       product.usar_preco_manual,
-      product.preco_venda_manual
+      product.preco_venda_manual,
+      product.custo_embalagem || 0,
+      product.taxa_venda_percentual || 0,
+      product.imposto_percentual || 0
     );
 
     // 6. Atualizar produto com os novos valores calculados

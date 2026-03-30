@@ -6,11 +6,12 @@ import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabase';
 import { formatCurrency, calculateProductPricing, recalculateAllProducts } from '../services/bakeryService';
 import { FichaTecnica } from './FichaTecnica';
+import { Precificacao } from './Precificacao';
 
 const columnHelper = createColumnHelper<any>();
 
 export const BaseDeDados = () => {
-  const [activeTab, setActiveTab] = useState<'ingredientes' | 'produtos' | 'categorias' | 'despesas' | 'clientes'>('ingredientes');
+  const [activeTab, setActiveTab] = useState<'ingredientes' | 'produtos' | 'categorias' | 'despesas' | 'clientes' | 'precificacao'>('ingredientes');
   const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
 
   const recalculateAll = async () => {
@@ -67,9 +68,12 @@ export const BaseDeDados = () => {
     }),
     columnHelper.accessor('rendimento_unidades', { header: 'Rendimento', cell: EditableCell }),
     columnHelper.accessor('custo_total_calculado', { 
-      header: 'Custo Total', 
+      header: 'Custo Ficha', 
       cell: info => <span className="font-mono text-xs">{formatCurrency(info.getValue() || 0)}</span> 
     }),
+    columnHelper.accessor('custo_embalagem', { header: 'Custo Emb.', cell: EditableCell }),
+    columnHelper.accessor('taxa_venda_percentual', { header: 'Taxas %', cell: EditableCell }),
+    columnHelper.accessor('imposto_percentual', { header: 'Imposto %', cell: EditableCell }),
     columnHelper.accessor('usar_margem_categoria', { 
       header: 'Usar Margem Cat.', 
       cell: (props) => (
@@ -216,6 +220,12 @@ export const BaseDeDados = () => {
           >
             Clientes
           </button>
+          <button 
+            onClick={() => setActiveTab('precificacao')}
+            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'precificacao' ? 'bg-white shadow-sm text-primary' : 'text-on-surface-variant hover:text-primary'}`}
+          >
+            Precificação
+          </button>
         </div>
 
       </div>
@@ -226,6 +236,7 @@ export const BaseDeDados = () => {
         {activeTab === 'categorias' && <DatabaseGrid table="categorias" title="Categorias de Produtos" columns={categoryColumns} onDataChange={() => {}} />}
         {activeTab === 'despesas' && <DatabaseGrid table="despesas_fixas" title="Despesas Fixas Mensais" columns={expenseColumns} onDataChange={() => {}} />}
         {activeTab === 'clientes' && <DatabaseGrid table="clientes" title="Base de Clientes" columns={clientColumns} onDataChange={() => {}} />}
+        {activeTab === 'precificacao' && <Precificacao />}
       </div>
 
       {selectedProduct && (
