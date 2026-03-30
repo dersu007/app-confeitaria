@@ -104,11 +104,19 @@ export const FichaTecnica = ({ product, onClose, onUpdate }: FichaTecnicaProps) 
       );
     }
 
-    const { error } = await supabase.from('produto_ingredientes').update(updatedItem).eq('id', id);
+    // Update only the changed field and the calculated cost
+    const updatePayload: any = { [field]: value };
+    if (updatedItem.custo_calculado !== item.custo_calculado) {
+      updatePayload.custo_calculado = updatedItem.custo_calculado;
+    }
+
+    const { error } = await supabase.from('produto_ingredientes').update(updatePayload).eq('id', id);
+    
     if (error) {
+      console.error('Erro ao atualizar item da ficha técnica:', error);
       toast.error('Erro ao atualizar');
     } else {
-      const newItems = produtoIngredientes.map(i => i.id === id ? updatedItem : i);
+      const newItems = produtoIngredientes.map(i => i.id === id ? { ...i, ...updatePayload } : i);
       setProdutoIngredientes(newItems);
       
       // Recalculate product total cost and pricing

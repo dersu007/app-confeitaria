@@ -86,7 +86,7 @@ export const calculateProductPricing = (
 
 export const recalculateProduct = async (productId: string, supabase: any) => {
   try {
-    // 1. Get product, its ingredients and its category
+    // 1. Buscar produto e sua categoria
     const { data: product, error: pErr } = await supabase
       .from('produtos')
       .select('*, categoria:categorias!categoria_id(*)')
@@ -98,6 +98,7 @@ export const recalculateProduct = async (productId: string, supabase: any) => {
       return null;
     }
 
+    // 2. Buscar produto_ingredientes (itens da receita)
     const { data: recipeItems, error: rErr } = await supabase
       .from('produto_ingredientes')
       .select('*, ingrediente:ingredientes!ingrediente_id(*)')
@@ -108,58 +109,61 @@ export const recalculateProduct = async (productId: string, supabase: any) => {
       return null;
     }
 
-  // 2. Calculate total cost
-  let totalCost = 0;
-  const updatedRecipeItems = [];
+    // 3. Calcular custo_calculado de cada ingrediente e somar custo_total_calculado
+    let totalCost = 0;
+    const updatedRecipeItems = [];
 
-  for (const item of recipeItems) {
-    if (item.ingrediente) {
-      const itemCost = calculateRecipeIngredientCost(
-        item.quantidade,
-        item.unidade,
-        item.ingrediente.preco_por_unidade_base
-      );
-      totalCost += itemCost;
-      
-      // Update item cost if it changed
-      if (item.custo_calculado !== itemCost) {
-        updatedRecipeItems.push({ id: item.id, custo_calculado: itemCost });
+    for (const item of recipeItems) {
+      if (item.ingrediente) {
+        const itemCost = calculateRecipeIngredientCost(
+          item.quantidade,
+          item.unidade,
+          item.ingrediente.preco_por_unidade_base
+        );
+        totalCost += itemCost;
+        
+        // Atualizar custo_calculado no banco se necessário
+        if (item.custo_calculado !== itemCost) {
+          updatedRecipeItems.push({ id: item.id, custo_calculado: itemCost });
+        }
       }
     }
-  }
 
-  totalCost = Math.round((totalCost + Number.EPSILON) * 100) / 100;
+    totalCost = Math.round((totalCost + Number.EPSILON) * 100) / 100;
 
-  // 3. Update recipe items if needed
-  if (updatedRecipeItems.length > 0) {
-    for (const item of updatedRecipeItems) {
-      await supabase.from('produto_ingredientes').update({ custo_calculado: item.custo_calculado }).eq('id', item.id);
+    // Atualizar itens da receita no banco
+    if (updatedRecipeItems.length > 0) {
+      for (const item of updatedRecipeItems) {
+        await supabase.from('produto_ingredientes').update({ custo_calculado: item.custo_calculado }).eq('id', item.id);
+      }
     }
-  }
 
-  // 4. Calculate pricing
-  const unitCost = calculateUnitCost(totalCost, product.rendimento_unidades);
-  const activeMargin = resolveProductMargin(product, product.categoria);
-  
-  const { precoVendaFinal, margemRealCalculada } = calculateProductPricing(
-    unitCost,
-    activeMargin.margem,
-    activeMargin.tipo,
-    product.usar_preco_manual,
-    product.preco_venda_manual
-  );
+    // 4. Calcular custo_unitario (usando rendimento_unidades)
+    const unitCost = calculateUnitCost(totalCost, product.rendimento_unidades);
 
-  // 5. Update product
-  const { data: updatedProduct, error: uErr } = await supabase.from('produtos').update({
-    custo_total_calculado: totalCost,
-    preco_venda_final: precoVendaFinal,
-    margem_real_calculada: margemRealCalculada
-  }).eq('id', productId).select().single();
+    // 5. Calcular preco_venda_final e margem_real_calculada
+    const activeMargin = resolveProductMargin(product, product.categoria);
+    
+    const { precoVendaFinal, margemRealCalculada } = calculateProductPricing(
+      unitCost,
+      activeMargin.margem,
+      activeMargin.tipo,
+      product.usar_preco_manual,
+      product.preco_venda_manual
+    );
 
-  if (uErr) {
-    console.error('Erro ao atualizar produto:', uErr);
-  }
+    // 6. Atualizar produto com os novos valores calculados
+    const { data: updatedProduct, error: uErr } = await supabase.from('produtos').update({
+      custo_total_calculado: totalCost,
+      preco_venda_final: precoVendaFinal,
+      margem_real_calculada: margemRealCalculada
+    }).eq('id', productId).select().single();
 
+    if (uErr) {
+      console.error('Erro ao atualizar produto após recálculo:', uErr);
+    }
+
+    return updatedProduct;
   } catch (err) {
     console.error('Erro inesperado no recálculo do produto:', err);
     return null;
