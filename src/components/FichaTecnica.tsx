@@ -34,70 +34,45 @@ interface FichaTecnicaProps {
   onUpdate: () => void;
 }
 
-export const FichaTecnica = ({ product, onClose, onUpdate }: FichaTecnicaProps) => {
+export const FichaTecnica = ({ product: initialProduct, onClose, onUpdate }: FichaTecnicaProps) => {
   const { user } = useAuth();
   const [ingredients, setIngredients] = useState<Ingrediente[]>([]);
   const [produtoIngredientes, setProdutoIngredientes] = useState<ProdutoIngrediente[]>([]);
+  const [currentProduct, setCurrentProduct] = useState<Produto>(initialProduct);
   const [loading, setLoading] = useState(true);
   const [isAdding, setIsAdding] = useState(false);
 
   useEffect(() => {
     fetchData();
-  }, [product.id]);
+  }, [initialProduct.id]);
 
   const fetchData = async () => {
-    if (!product.id) return;
+    if (!initialProduct.id) return;
     setLoading(true);
     try {
-      const [ingRes, recRes] = await Promise.all([
+      const [ingRes, recRes, prodRes] = await Promise.all([
         supabase.from('ingredientes').select('*').order('nome'),
-        supabase.from('produto_ingredientes').select('*, ingrediente:ingredientes(*)').eq('produto_id', product.id)
+        supabase.from('produto_ingredientes').select('*, ingrediente:ingredientes(*)').eq('produto_id', initialProduct.id),
+        supabase.from('produtos').select('*').eq('id', initialProduct.id).single()
       ]);
 
-      if (ingRes.error) {
-        console.error('Erro ao carregar ingredientes:', {
-          code: ingRes.error.code,
-          message: ingRes.error.message,
-          details: ingRes.error.details
-        });
-        toast.error(`Erro no Banco (${ingRes.error.code}): ${ingRes.error.message}`);
-        throw ingRes.error;
-      }
-      
-      if (recRes.error) {
-        console.error('Erro ao carregar itens da ficha:', {
-          code: recRes.error.code,
-          message: recRes.error.message,
-          details: recRes.error.details
-        });
-        toast.error(`Erro no Banco (${recRes.error.code}): ${recRes.error.message}`);
-        throw recRes.error;
-      }
+      if (ingRes.error) throw ingRes.error;
+      if (recRes.error) throw recRes.error;
+      if (prodRes.error) throw prodRes.error;
 
-      const processedIngredients = (ingRes.data || []).map(ing => ({
-        ...ing,
-        unidade_embalagem: ing.unidade_embalagem || 'g'
-      }));
-
-      setIngredients(processedIngredients);
+      setIngredients(ingRes.data || []);
       setProdutoIngredientes(recRes.data || []);
+      setCurrentProduct(prodRes.data);
     } catch (error: any) {
       console.error('Erro ao carregar dados da ficha técnica:', error);
+      toast.error('Erro ao carregar dados');
     } finally {
       setLoading(false);
     }
   };
 
   const addItem = async () => {
-    if (!product.id) {
-      toast.error('Erro: Produto não identificado');
-      return;
-    }
-    if (!user?.id) {
-      toast.error('Erro: Usuário não autenticado');
-      return;
-    }
-
+    if (!initialProduct.id || !user?.id) return;
     if (ingredients.length === 0) {
       toast.error('Cadastre ingredientes primeiro');
       return;
@@ -108,9 +83,8 @@ export const FichaTecnica = ({ product, onClose, onUpdate }: FichaTecnicaProps) 
     const availableUnits = getAvailableUnits(firstIngredient.id);
     const initialUnit = availableUnits[0] || 'g';
     
-    // Blindagem: Payload explícito com valores padrão e user_id
     const newItem = {
-      produto_id: product.id,
+      produto_id: initialProduct.id,
       ingrediente_id: firstIngredient.id,
       quantidade: 0,
       unidade: initialUnit,
@@ -124,25 +98,16 @@ export const FichaTecnica = ({ product, onClose, onUpdate }: FichaTecnicaProps) 
         .insert([newItem])
         .select('*, ingrediente:ingredientes(*)');
 
-      if (error) {
-        console.error('ERRO SUPABASE AO ADICIONAR ITEM NA FICHA:', {
-          code: error.code,
-          message: error.message,
-          details: error.details,
-          hint: error.hint,
-          payload: newItem
-        });
-        toast.error(`Erro no Banco (${error.code}): ${error.message}`);
-      } else if (data && data.length > 0) {
-        // Sincronização forçada
+      if (error) throw error;
+      
+      if (data && data.length > 0) {
         setProdutoIngredientes(prev => [...prev, data[0]]);
         await updateProductTotals();
-        await fetchData(); // Sincronização completa com o banco
         toast.success('Ingrediente adicionado');
       }
     } catch (err: any) {
-      console.error('Exceção ao adicionar ingrediente:', err);
-      toast.error(`Erro inesperado: ${err.message}`);
+      console.error('Erro ao adicionar ingrediente:', err);
+      toast.error('Erro ao adicionar ingrediente');
     } finally {
       setIsAdding(false);
     }
@@ -152,7 +117,6 @@ export const FichaTecnica = ({ product, onClose, onUpdate }: FichaTecnicaProps) 
     const item = produtoIngredientes.find(i => i.id === id);
     if (!item) return;
 
-    const originalItems = [...produtoIngredientes];
     let ingredientId = item.ingrediente_id;
     let quantity = item.quantidade;
     let unit = item.unidade;
@@ -182,53 +146,39 @@ export const FichaTecnica = ({ product, onClose, onUpdate }: FichaTecnicaProps) 
     };
 
     // Optimistic Update
-    const newItems = produtoIngredientes.map(i => i.id === id ? { ...i, ...updatePayload, ingrediente: ingredient } : i);
-    setProdutoIngredientes(newItems);
+    setProdutoIngredientes(prev => prev.map(i => i.id === id ? { ...i, ...updatePayload, ingrediente: ingredient } : i));
 
     try {
       const { error } = await supabase.from('produto_ingredientes').update(updatePayload).eq('id', id);
-      
-      if (error) {
-        console.error('ERRO SUPABASE AO ATUALIZAR ITEM DA FICHA:', {
-          code: error.code,
-          message: error.message,
-          details: error.details
-        });
-        toast.error(`Erro no Banco (${error.code}): ${error.message}`);
-        setProdutoIngredientes(originalItems);
-      } else {
-        await updateProductTotals();
-      }
+      if (error) throw error;
+      await updateProductTotals();
     } catch (err: any) {
       console.error('Erro ao atualizar item:', err);
-      setProdutoIngredientes(originalItems);
+      toast.error('Erro ao salvar alteração');
+      fetchData(); // Reverter para o estado do banco
     }
   };
 
   const deleteItem = async (id: string) => {
     try {
       const { error } = await supabase.from('produto_ingredientes').delete().eq('id', id);
-      if (error) {
-        console.error('ERRO SUPABASE AO DELETAR ITEM DA FICHA:', {
-          code: error.code,
-          message: error.message,
-          details: error.details
-        });
-        toast.error(`Erro no Banco (${error.code}): ${error.message}`);
-      } else {
-        const newItems = produtoIngredientes.filter(i => i.id !== id);
-        setProdutoIngredientes(newItems);
-        await updateProductTotals();
-        toast.success('Removido da ficha');
-      }
+      if (error) throw error;
+      
+      setProdutoIngredientes(prev => prev.filter(i => i.id !== id));
+      await updateProductTotals();
+      toast.success('Removido da ficha');
     } catch (err: any) {
       console.error('Erro ao deletar item:', err);
+      toast.error('Erro ao remover item');
     }
   };
 
   const updateProductTotals = async () => {
     try {
-      await recalculateProduct(product.id, supabase);
+      const updatedProduct = await recalculateProduct(initialProduct.id, supabase);
+      if (updatedProduct) {
+        setCurrentProduct(updatedProduct);
+      }
       onUpdate();
     } catch (error: any) {
       console.error('Erro ao recalcular totais do produto:', error);
@@ -252,7 +202,7 @@ export const FichaTecnica = ({ product, onClose, onUpdate }: FichaTecnicaProps) 
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
         <div className="p-6 border-b border-surface-container-high flex justify-between items-center bg-surface-container-low">
           <div>
-            <h2 className="text-xl font-bold headline text-primary">Ficha Técnica: {product.nome}</h2>
+            <h2 className="text-xl font-bold headline text-primary">Ficha Técnica: {currentProduct.nome}</h2>
             <p className="text-xs text-on-surface-variant">Configure os ingredientes e proporções da receita</p>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-surface-container-high rounded-full transition-all">
@@ -349,8 +299,8 @@ export const FichaTecnica = ({ product, onClose, onUpdate }: FichaTecnicaProps) 
               <span className="text-xl font-bold text-primary">{formatCurrency(totalCost)}</span>
             </div>
             <div className="bg-white px-4 py-2 rounded-xl border border-surface-container-high shadow-sm">
-              <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Custo por Unidade ({product.rendimento_unidades})</span>
-              <span className="text-xl font-bold text-on-surface">{formatCurrency(totalCost / (product.rendimento_unidades || 1))}</span>
+              <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Custo por Unidade ({currentProduct.rendimento_unidades})</span>
+              <span className="text-xl font-bold text-on-surface">{formatCurrency(totalCost / (currentProduct.rendimento_unidades || 1))}</span>
             </div>
           </div>
           <button

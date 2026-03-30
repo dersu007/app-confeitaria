@@ -40,7 +40,7 @@ interface DatabaseGridProps {
   onDataChange?: () => void;
 }
 
-export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChange }: DatabaseGridProps) => {
+export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChange, refreshKey }: DatabaseGridProps & { refreshKey?: number }) => {
   const { user } = useAuth();
   const [data, setData] = useState<any[]>([]);
   const [globalFilter, setGlobalFilter] = useState('');
@@ -72,7 +72,7 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
 
   useEffect(() => {
     fetchData();
-  }, [table]);
+  }, [table, refreshKey]);
 
   const updateRow = async (rowIndex: number, columnId: string, value: any) => {
     const row = data[rowIndex];
@@ -261,6 +261,7 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
       } else if (result && result.length > 0) {
         setData(old => [result[0], ...old]);
         toast.success('Adicionado com sucesso');
+        if (onDataChange) onDataChange();
       }
     } catch (err: any) {
       console.error('Exceção ao adicionar registro:', err);
@@ -289,6 +290,7 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
 
       setData(old => old.filter(row => row.id !== id));
       toast.success('Deletado');
+      if (onDataChange) onDataChange();
     } catch (err: any) {
       console.error('Erro ao deletar:', err);
       toast.error(`Erro inesperado: ${err.message}`);

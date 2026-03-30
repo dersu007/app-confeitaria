@@ -13,11 +13,15 @@ const columnHelper = createColumnHelper<any>();
 export const BaseDeDados = () => {
   const [activeTab, setActiveTab] = useState<'ingredientes' | 'produtos' | 'categorias' | 'despesas' | 'clientes' | 'precificacao'>('ingredientes');
   const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const refresh = () => setRefreshKey(prev => prev + 1);
 
   const recalculateAll = async () => {
     const loadingToast = toast.loading('Recalculando tudo...');
     try {
       await recalculateAllProducts(supabase);
+      refresh();
       toast.success('Recalculado com sucesso!', { id: loadingToast });
     } catch (error) {
       toast.error('Erro ao recalcular', { id: loadingToast });
@@ -231,11 +235,11 @@ export const BaseDeDados = () => {
       </div>
 
       <div className="relative">
-        {activeTab === 'ingredientes' && <DatabaseGrid table="ingredientes" title="Base de Ingredientes" columns={ingredientColumns} onDataChange={() => {}} />}
-        {activeTab === 'produtos' && <DatabaseGrid table="produtos" title="Base de Produtos" columns={productColumns} onDataChange={() => {}} />}
-        {activeTab === 'categorias' && <DatabaseGrid table="categorias" title="Categorias de Produtos" columns={categoryColumns} onDataChange={() => {}} />}
-        {activeTab === 'despesas' && <DatabaseGrid table="despesas_fixas" title="Despesas Fixas Mensais" columns={expenseColumns} onDataChange={() => {}} />}
-        {activeTab === 'clientes' && <DatabaseGrid table="clientes" title="Base de Clientes" columns={clientColumns} onDataChange={() => {}} />}
+        {activeTab === 'ingredientes' && <DatabaseGrid table="ingredientes" title="Base de Ingredientes" columns={ingredientColumns} onDataChange={recalculateAll} refreshKey={refreshKey} />}
+        {activeTab === 'produtos' && <DatabaseGrid table="produtos" title="Base de Produtos" columns={productColumns} onDataChange={recalculateAll} refreshKey={refreshKey} />}
+        {activeTab === 'categorias' && <DatabaseGrid table="categorias" title="Categorias de Produtos" columns={categoryColumns} onDataChange={recalculateAll} refreshKey={refreshKey} />}
+        {activeTab === 'despesas' && <DatabaseGrid table="despesas_fixas" title="Despesas Fixas Mensais" columns={expenseColumns} onDataChange={recalculateAll} refreshKey={refreshKey} />}
+        {activeTab === 'clientes' && <DatabaseGrid table="clientes" title="Base de Clientes" columns={clientColumns} onDataChange={recalculateAll} refreshKey={refreshKey} />}
         {activeTab === 'precificacao' && <Precificacao />}
       </div>
 
@@ -243,7 +247,7 @@ export const BaseDeDados = () => {
         <FichaTecnica 
           product={selectedProduct} 
           onClose={() => setSelectedProduct(null)} 
-          onUpdate={() => {}}
+          onUpdate={recalculateAll}
         />
       )}
     </div>
