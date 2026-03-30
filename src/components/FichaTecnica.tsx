@@ -37,16 +37,16 @@ export const FichaTecnica = ({ product, onClose, onUpdate }: FichaTecnicaProps) 
         supabase.from('produto_ingredientes').select('*').eq('produto_id', product.id)
       ]);
 
-      if (ingRes.error) {
-        console.error('Erro ao buscar ingredientes:', ingRes.error);
-        toast.error('Erro ao carregar ingredientes');
-      }
-      if (recRes.error) {
-        console.error('Erro ao buscar itens da receita:', recRes.error);
-        toast.error('Erro ao carregar itens da receita');
-      }
+      if (ingRes.error) throw ingRes.error;
+      if (recRes.error) throw recRes.error;
 
-      setIngredients(ingRes.data || []);
+      // Fallback for unidade_embalagem
+      const processedIngredients = (ingRes.data || []).map(ing => ({
+        ...ing,
+        unidade_embalagem: ing.unidade_embalagem || 'g'
+      }));
+
+      setIngredients(processedIngredients);
       setProdutoIngredientes(recRes.data || []);
     } catch (error) {
       console.error('Erro ao carregar dados da ficha técnica:', error);
@@ -62,11 +62,14 @@ export const FichaTecnica = ({ product, onClose, onUpdate }: FichaTecnicaProps) 
       return;
     }
 
+    const firstIngredient = ingredients[0];
+    const availableUnits = getAvailableUnits(firstIngredient.id);
+
     const newItem = {
       produto_id: product.id,
-      ingrediente_id: ingredients[0].id,
+      ingrediente_id: firstIngredient.id,
       quantidade: 0,
-      unidade: 'g',
+      unidade: availableUnits[0],
       custo_calculado: 0,
       user_id: user?.id
     };
@@ -91,24 +94,33 @@ export const FichaTecnica = ({ product, onClose, onUpdate }: FichaTecnicaProps) 
     const item = produtoIngredientes.find(i => i.id === id);
     if (!item) return;
 
-    const ingredientId = field === 'ingrediente_id' ? value : item.ingrediente_id;
-    const ingredient = ingredients.find(ing => ing.id === ingredientId);
-    
-    const updatedItem = { ...item, [field]: value };
-    
-    if (ingredient) {
-      updatedItem.custo_calculado = calculateRecipeIngredientCost(
-        updatedItem.quantidade,
-        updatedItem.unidade,
-        ingredient.preco_por_unidade_base
-      );
+    let ingredientId = item.ingrediente_id;
+    let quantity = item.quantidade;
+    let unit = item.unidade;
+
+    if (field === 'ingrediente_id') {
+      ingredientId = value;
+      const availableUnits = getAvailableUnits(value);
+      if (!availableUnits.includes(unit)) {
+        unit = availableUnits[0];
+      }
+    } else if (field === 'quantidade') {
+      quantity = Number(value) || 0;
+    } else if (field === 'unidade') {
+      unit = value;
     }
 
-    // Update only the changed field and the calculated cost
-    const updatePayload: any = { [field]: value };
-    if (updatedItem.custo_calculado !== item.custo_calculado) {
-      updatePayload.custo_calculado = updatedItem.custo_calculado;
-    }
+    const ingredient = ingredients.find(ing => ing.id === ingredientId);
+    const custo_calculado = ingredient 
+      ? calculateRecipeIngredientCost(quantity, unit, ingredient.preco_por_unidade_base)
+      : 0;
+
+    const updatePayload = {
+      ingrediente_id: ingredientId,
+      quantidade: quantity,
+      unidade: unit,
+      custo_calculado
+    };
 
     const { error } = await supabase.from('produto_ingredientes').update(updatePayload).eq('id', id);
     
@@ -118,8 +130,6 @@ export const FichaTecnica = ({ product, onClose, onUpdate }: FichaTecnicaProps) 
     } else {
       const newItems = produtoIngredientes.map(i => i.id === id ? { ...i, ...updatePayload } : i);
       setProdutoIngredientes(newItems);
-      
-      // Recalculate product total cost and pricing
       await updateProductTotals();
     }
   };

@@ -6,29 +6,40 @@ import { Ingrediente, Produto, ProdutoIngrediente, Categoria, TipoMargem } from 
 
 export const convertToStandardUnit = (value: number, unit: string): number => {
   const u = unit?.toLowerCase();
+  const v = Number(value) || 0;
+  
   switch (u) {
     case 'kg':
     case 'l':
-      return value * 1000;
+      return v * 1000;
     case 'g':
     case 'ml':
     case 'un':
     default:
-      return value;
+      return v;
   }
 };
 
 export const calculateIngredientUnitPrice = (precoEmbalagem: number, pesoEmbalagem: number, unidade: string): number => {
-  const pesoPadrao = convertToStandardUnit(pesoEmbalagem, unidade);
+  const pEmbalagem = Number(precoEmbalagem) || 0;
+  const pPeso = Number(pesoEmbalagem) || 0;
+  
+  const pesoPadrao = convertToStandardUnit(pPeso, unidade);
   if (pesoPadrao <= 0) return 0;
-  const result = precoEmbalagem / pesoPadrao;
-  return Math.round((result + Number.EPSILON) * 10000) / 10000; // 4 decimal places for unit price
+  
+  const result = pEmbalagem / pesoPadrao;
+  return isNaN(result) ? 0 : Math.round((result + Number.EPSILON) * 10000) / 10000; // 4 decimal places for unit price
 };
 
-export const calculateRecipeIngredientCost = (quantidade: number, unidade: string, precoUnidadeBase: number): number => {
-  const qtdPadrao = convertToStandardUnit(quantidade, unidade);
-  const result = qtdPadrao * precoUnidadeBase;
-  return Math.round((result + Number.EPSILON) * 100) / 100;
+export const calculateRecipeIngredientCost = (quantidade: number, unidade: string, precoUnidadeBase: number | null | undefined): number => {
+  const pUnidadeBase = Number(precoUnidadeBase) || 0;
+  if (pUnidadeBase <= 0) return 0;
+  
+  const qtd = Number(quantidade) || 0;
+  const qtdPadrao = convertToStandardUnit(qtd, unidade);
+  
+  const result = qtdPadrao * pUnidadeBase;
+  return isNaN(result) ? 0 : Math.round((result + Number.EPSILON) * 100) / 100;
 };
 
 export const resolveProductMargin = (produto: Partial<Produto>, categoria?: Categoria) => {
@@ -129,6 +140,7 @@ export const recalculateProduct = async (productId: string, supabase: any) => {
       }
     }
 
+    if (isNaN(totalCost)) totalCost = 0;
     totalCost = Math.round((totalCost + Number.EPSILON) * 100) / 100;
 
     // Atualizar itens da receita no banco
