@@ -61,13 +61,14 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
 
     if (numericFields.includes(columnId)) {
       if (typeof value === 'string') {
-        // Improved parsing: remove currency symbols, spaces, handle Brazilian decimal
-        const cleanValue = value.replace(/[^\d,-]/g, '').replace(',', '.');
-        finalValue = Number(cleanValue);
+        // Limpeza profissional: remove tudo que não é dígito, vírgula ou ponto
+        // Converte vírgula para ponto para garantir o Number()
+        const cleanValue = value.replace(/[^\d,.-]/g, '').replace(',', '.');
+        finalValue = parseFloat(cleanValue);
       } else {
         finalValue = Number(value);
       }
-      if (isNaN(finalValue)) finalValue = 0;
+      if (isNaN(finalValue) || !isFinite(finalValue)) finalValue = 0;
     } else if (booleanFields.includes(columnId)) {
       finalValue = value === 'true' || value === true;
     }

@@ -57,6 +57,11 @@ export const FichaTecnica = ({ product, onClose, onUpdate }: FichaTecnicaProps) 
   };
 
   const addItem = async () => {
+    if (!product.id || !user?.id) {
+      toast.error('Erro de autenticação ou produto não identificado');
+      return;
+    }
+
     if (ingredients.length === 0) {
       toast.error('Cadastre ingredientes primeiro');
       return;
@@ -64,23 +69,41 @@ export const FichaTecnica = ({ product, onClose, onUpdate }: FichaTecnicaProps) 
 
     const firstIngredient = ingredients[0];
     const availableUnits = getAvailableUnits(firstIngredient.id);
+    const initialUnit = availableUnits[0];
+    
+    // Cálculo imediato do custo
+    const initialCost = calculateRecipeIngredientCost(
+      0, 
+      initialUnit, 
+      firstIngredient.preco_por_unidade_base
+    );
 
     const newItem = {
       produto_id: product.id,
       ingrediente_id: firstIngredient.id,
       quantidade: 0,
-      unidade: availableUnits[0],
-      custo_calculado: 0,
-      user_id: user?.id
+      unidade: initialUnit,
+      custo_calculado: initialCost,
+      user_id: user.id
     };
 
     try {
-      const { data, error } = await supabase.from('produto_ingredientes').insert([newItem]).select();
+      const { data, error } = await supabase
+        .from('produto_ingredientes')
+        .insert([newItem])
+        .select();
+
       if (error) {
-        console.error('Erro detalhado ao adicionar ingrediente:', error);
-        toast.error(`Erro ao adicionar: ${error.message || 'Erro desconhecido'}`);
+        console.error('Erro ao adicionar ingrediente:', error);
+        toast.error(`Erro ao adicionar: ${error.message}`);
       } else if (data && data.length > 0) {
-        setProdutoIngredientes([...produtoIngredientes, data[0]]);
+        // Garantir que o estado tenha o objeto 'ingrediente' para exibir o nome
+        const insertedItem = {
+          ...data[0],
+          ingrediente: firstIngredient
+        };
+        
+        setProdutoIngredientes([...produtoIngredientes, insertedItem]);
         await updateProductTotals();
         toast.success('Ingrediente adicionado');
       }

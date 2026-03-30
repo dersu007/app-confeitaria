@@ -24,11 +24,13 @@ export const calculateIngredientUnitPrice = (precoEmbalagem: number, pesoEmbalag
   const pEmbalagem = Number(precoEmbalagem) || 0;
   const pPeso = Number(pesoEmbalagem) || 0;
   
+  if (pPeso <= 0) return 0; // Proteção contra divisão por zero
+  
   const pesoPadrao = convertToStandardUnit(pPeso, unidade);
-  if (pesoPadrao <= 0) return 0;
+  if (pesoPadrao <= 0) return 0; // Proteção contra divisão por zero após conversão
   
   const result = pEmbalagem / pesoPadrao;
-  return isNaN(result) ? 0 : Math.round((result + Number.EPSILON) * 10000) / 10000; // 4 decimal places for unit price
+  return isNaN(result) || !isFinite(result) ? 0 : Math.round((result + Number.EPSILON) * 10000) / 10000; // 4 decimal places for unit price
 };
 
 export const calculateRecipeIngredientCost = (quantidade: number, unidade: string, precoUnidadeBase: number | null | undefined): number => {
@@ -167,6 +169,7 @@ export const recalculateProduct = async (productId: string, supabase: any) => {
     // 6. Atualizar produto com os novos valores calculados
     const { data: updatedProduct, error: uErr } = await supabase.from('produtos').update({
       custo_total_calculado: totalCost,
+      custo_unitario_snapshot: unitCost,
       preco_venda_final: precoVendaFinal,
       margem_real_calculada: margemRealCalculada
     }).eq('id', productId).select().single();
@@ -208,10 +211,11 @@ export const recalculateProductsUsingIngredient = async (ingredientId: string, s
 };
 
 export const calculateUnitCost = (custoTotal: number | undefined | null, rendimento: number | undefined | null): number => {
-  const c = custoTotal || 0;
-  const r = rendimento || 1;
-  if (r <= 0) return 0;
-  return c / r;
+  const c = Number(custoTotal) || 0;
+  const r = Number(rendimento) || 1;
+  if (r <= 0) return 0; // Proteção contra divisão por zero
+  const result = c / r;
+  return isNaN(result) || !isFinite(result) ? 0 : result;
 };
 
 export const formatCurrency = (value: number) => {
