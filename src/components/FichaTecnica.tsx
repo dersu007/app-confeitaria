@@ -5,13 +5,28 @@ import { Produto, ProdutoIngrediente, Ingrediente } from '../types';
 import { 
   formatCurrency, 
   calculateRecipeIngredientCost, 
-  calculateProductPricing, 
-  calculateUnitCost,
-  resolveProductMargin,
   recalculateProduct
 } from '../services/bakeryService';
-import { X, Trash2, Plus } from 'lucide-react';
+import { X, Trash2, Plus, RefreshCw, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
+
+/*
+  SQL PARA SUPABASE (RLS POLICIES):
+  
+  -- Habilitar RLS para todas as tabelas
+  ALTER TABLE ingredientes ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE produtos ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE produto_ingredientes ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE categorias ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE despesas_fixas ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE clientes ENABLE ROW LEVEL SECURITY;
+
+  -- Criar políticas de acesso (Exemplo para produto_ingredientes)
+  CREATE POLICY "Permitir tudo para usuários autenticados" ON produto_ingredientes FOR ALL TO authenticated USING (true) WITH CHECK (true);
+  CREATE POLICY "Permitir tudo para usuários autenticados" ON ingredientes FOR ALL TO authenticated USING (true) WITH CHECK (true);
+  CREATE POLICY "Permitir tudo para usuários autenticados" ON produtos FOR ALL TO authenticated USING (true) WITH CHECK (true);
+  CREATE POLICY "Permitir tudo para usuários autenticados" ON categorias FOR ALL TO authenticated USING (true) WITH CHECK (true);
+*/
 
 interface FichaTecnicaProps {
   product: Produto;
@@ -24,23 +39,41 @@ export const FichaTecnica = ({ product, onClose, onUpdate }: FichaTecnicaProps) 
   const [ingredients, setIngredients] = useState<Ingrediente[]>([]);
   const [produtoIngredientes, setProdutoIngredientes] = useState<ProdutoIngrediente[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isAdding, setIsAdding] = useState(false);
 
   useEffect(() => {
     fetchData();
   }, [product.id]);
 
   const fetchData = async () => {
+    if (!product.id) return;
     setLoading(true);
     try {
       const [ingRes, recRes] = await Promise.all([
         supabase.from('ingredientes').select('*').order('nome'),
-        supabase.from('produto_ingredientes').select('*').eq('produto_id', product.id)
+        supabase.from('produto_ingredientes').select('*, ingrediente:ingredientes(*)').eq('produto_id', product.id)
       ]);
 
-      if (ingRes.error) throw ingRes.error;
-      if (recRes.error) throw recRes.error;
+      if (ingRes.error) {
+        console.error('Erro ao carregar ingredientes:', {
+          code: ingRes.error.code,
+          message: ingRes.error.message,
+          details: ingRes.error.details
+        });
+        toast.error(`Erro no Banco (${ingRes.error.code}): ${ingRes.error.message}`);
+        throw ingRes.error;
+      }
+      
+      if (recRes.error) {
+        console.error('Erro ao carregar itens da ficha:', {
+          code: recRes.error.code,
+          message: recRes.error.message,
+          details: recRes.error.details
+        });
+        toast.error(`Erro no Banco (${recRes.error.code}): ${recRes.error.message}`);
+        throw recRes.error;
+      }
 
-      // Fallback for unidade_embalagem
       const processedIngredients = (ingRes.data || []).map(ing => ({
         ...ing,
         unidade_embalagem: ing.unidade_embalagem || 'g'
@@ -48,17 +81,20 @@ export const FichaTecnica = ({ product, onClose, onUpdate }: FichaTecnicaProps) 
 
       setIngredients(processedIngredients);
       setProdutoIngredientes(recRes.data || []);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao carregar dados da ficha técnica:', error);
-      toast.error('Erro ao carregar dados');
     } finally {
       setLoading(false);
     }
   };
 
   const addItem = async () => {
-    if (!product.id || !user?.id) {
-      toast.error('Erro de autenticação ou produto não identificado');
+    if (!product.id) {
+      toast.error('Erro: Produto não identificado');
+      return;
+    }
+    if (!user?.id) {
+      toast.error('Erro: Usuário não autenticado');
       return;
     }
 
@@ -67,23 +103,18 @@ export const FichaTecnica = ({ product, onClose, onUpdate }: FichaTecnicaProps) 
       return;
     }
 
+    setIsAdding(true);
     const firstIngredient = ingredients[0];
     const availableUnits = getAvailableUnits(firstIngredient.id);
-    const initialUnit = availableUnits[0];
+    const initialUnit = availableUnits[0] || 'g';
     
-    // Cálculo imediato do custo
-    const initialCost = calculateRecipeIngredientCost(
-      0, 
-      initialUnit, 
-      firstIngredient.preco_por_unidade_base
-    );
-
+    // Blindagem: Payload explícito com valores padrão e user_id
     const newItem = {
       produto_id: product.id,
       ingrediente_id: firstIngredient.id,
       quantidade: 0,
       unidade: initialUnit,
-      custo_calculado: initialCost,
+      custo_calculado: 0,
       user_id: user.id
     };
 
@@ -91,25 +122,29 @@ export const FichaTecnica = ({ product, onClose, onUpdate }: FichaTecnicaProps) 
       const { data, error } = await supabase
         .from('produto_ingredientes')
         .insert([newItem])
-        .select();
+        .select('*, ingrediente:ingredientes(*)');
 
       if (error) {
-        console.error('Erro ao adicionar ingrediente:', error);
-        toast.error(`Erro ao adicionar: ${error.message}`);
+        console.error('ERRO SUPABASE AO ADICIONAR ITEM NA FICHA:', {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          payload: newItem
+        });
+        toast.error(`Erro no Banco (${error.code}): ${error.message}`);
       } else if (data && data.length > 0) {
-        // Garantir que o estado tenha o objeto 'ingrediente' para exibir o nome
-        const insertedItem = {
-          ...data[0],
-          ingrediente: firstIngredient
-        };
-        
-        setProdutoIngredientes([...produtoIngredientes, insertedItem]);
+        // Sincronização forçada
+        setProdutoIngredientes(prev => [...prev, data[0]]);
         await updateProductTotals();
+        await fetchData(); // Sincronização completa com o banco
         toast.success('Ingrediente adicionado');
       }
     } catch (err: any) {
       console.error('Exceção ao adicionar ingrediente:', err);
       toast.error(`Erro inesperado: ${err.message}`);
+    } finally {
+      setIsAdding(false);
     }
   };
 
@@ -117,6 +152,7 @@ export const FichaTecnica = ({ product, onClose, onUpdate }: FichaTecnicaProps) 
     const item = produtoIngredientes.find(i => i.id === id);
     if (!item) return;
 
+    const originalItems = [...produtoIngredientes];
     let ingredientId = item.ingrediente_id;
     let quantity = item.quantidade;
     let unit = item.unidade;
@@ -145,26 +181,48 @@ export const FichaTecnica = ({ product, onClose, onUpdate }: FichaTecnicaProps) 
       custo_calculado
     };
 
-    const { error } = await supabase.from('produto_ingredientes').update(updatePayload).eq('id', id);
-    
-    if (error) {
-      console.error('Erro ao atualizar item da ficha técnica:', error);
-      toast.error('Erro ao atualizar');
-    } else {
-      const newItems = produtoIngredientes.map(i => i.id === id ? { ...i, ...updatePayload } : i);
-      setProdutoIngredientes(newItems);
-      await updateProductTotals();
+    // Optimistic Update
+    const newItems = produtoIngredientes.map(i => i.id === id ? { ...i, ...updatePayload, ingrediente: ingredient } : i);
+    setProdutoIngredientes(newItems);
+
+    try {
+      const { error } = await supabase.from('produto_ingredientes').update(updatePayload).eq('id', id);
+      
+      if (error) {
+        console.error('ERRO SUPABASE AO ATUALIZAR ITEM DA FICHA:', {
+          code: error.code,
+          message: error.message,
+          details: error.details
+        });
+        toast.error(`Erro no Banco (${error.code}): ${error.message}`);
+        setProdutoIngredientes(originalItems);
+      } else {
+        await updateProductTotals();
+      }
+    } catch (err: any) {
+      console.error('Erro ao atualizar item:', err);
+      setProdutoIngredientes(originalItems);
     }
   };
 
   const deleteItem = async (id: string) => {
-    const { error } = await supabase.from('produto_ingredientes').delete().eq('id', id);
-    if (error) {
-      toast.error('Erro ao remover');
-    } else {
-      const newItems = produtoIngredientes.filter(i => i.id !== id);
-      setProdutoIngredientes(newItems);
-      await updateProductTotals();
+    try {
+      const { error } = await supabase.from('produto_ingredientes').delete().eq('id', id);
+      if (error) {
+        console.error('ERRO SUPABASE AO DELETAR ITEM DA FICHA:', {
+          code: error.code,
+          message: error.message,
+          details: error.details
+        });
+        toast.error(`Erro no Banco (${error.code}): ${error.message}`);
+      } else {
+        const newItems = produtoIngredientes.filter(i => i.id !== id);
+        setProdutoIngredientes(newItems);
+        await updateProductTotals();
+        toast.success('Removido da ficha');
+      }
+    } catch (err: any) {
+      console.error('Erro ao deletar item:', err);
     }
   };
 
@@ -172,9 +230,8 @@ export const FichaTecnica = ({ product, onClose, onUpdate }: FichaTecnicaProps) 
     try {
       await recalculateProduct(product.id, supabase);
       onUpdate();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao recalcular totais do produto:', error);
-      toast.error('Erro ao atualizar totais');
     }
   };
 
@@ -230,11 +287,13 @@ export const FichaTecnica = ({ product, onClose, onUpdate }: FichaTecnicaProps) 
                   </td>
                   <td className="py-3 pr-4">
                     <input
-                      type="number"
+                      type="text"
                       value={item.quantidade}
                       onChange={(e) => {
-                        const val = parseFloat(e.target.value);
-                        updateItem(item.id, 'quantidade', isNaN(val) ? 0 : val);
+                        const val = e.target.value.replace(',', '.');
+                        if (!isNaN(val as any)) {
+                          updateItem(item.id, 'quantidade', parseFloat(val) || 0);
+                        }
                       }}
                       className="w-full bg-surface-container-low border-none rounded-lg text-sm p-2 focus:ring-2 focus:ring-primary/20"
                     />
@@ -268,15 +327,18 @@ export const FichaTecnica = ({ product, onClose, onUpdate }: FichaTecnicaProps) 
 
           {produtoIngredientes.length === 0 && !loading && (
             <div className="text-center py-12 text-on-surface-variant">
+              <AlertCircle size={32} className="mx-auto opacity-20 mb-2" />
               <p>Nenhum ingrediente adicionado ainda.</p>
             </div>
           )}
 
           <button
             onClick={addItem}
-            className="mt-4 flex items-center gap-2 text-primary font-bold text-sm hover:underline"
+            disabled={isAdding}
+            className="mt-4 flex items-center gap-2 text-primary font-bold text-sm hover:underline disabled:opacity-50"
           >
-            <Plus size={16} /> Adicionar Ingrediente
+            {isAdding ? <RefreshCw size={16} className="animate-spin" /> : <Plus size={16} />} 
+            {isAdding ? 'Adicionando...' : 'Adicionar Ingrediente'}
           </button>
         </div>
 

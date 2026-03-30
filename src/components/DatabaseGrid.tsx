@@ -7,6 +7,7 @@ import {
   createColumnHelper,
 } from '@tanstack/react-table';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../lib/auth';
 import { Plus, Trash2, Save, RefreshCw, Search, ClipboardPaste } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { 
@@ -16,6 +17,22 @@ import {
   recalculateAllProducts 
 } from '../services/bakeryService';
 
+/*
+  SQL PARA SUPABASE (RLS POLICIES):
+  
+  -- Habilitar RLS para todas as tabelas
+  ALTER TABLE ingredientes ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE produtos ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE produto_ingredientes ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE categorias ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE despesas_fixas ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE clientes ENABLE ROW LEVEL SECURITY;
+
+  -- Criar políticas de acesso (Exemplo para ingredientes)
+  -- Substitua 'ingredientes' pelo nome de cada tabela
+  CREATE POLICY "Permitir tudo para usuários autenticados" ON ingredientes FOR ALL TO authenticated USING (true) WITH CHECK (true);
+*/
+
 interface DatabaseGridProps {
   table: string;
   title: string;
@@ -24,20 +41,33 @@ interface DatabaseGridProps {
 }
 
 export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChange }: DatabaseGridProps) => {
+  const { user } = useAuth();
   const [data, setData] = useState<any[]>([]);
   const [globalFilter, setGlobalFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [savingRows, setSavingRows] = useState<Set<string>>(new Set());
+  const [isRecalculating, setIsRecalculating] = useState(false);
 
   const fetchData = async () => {
     setLoading(true);
-    const { data: result, error } = await supabase.from(table).select('*').order('created_at', { ascending: false });
-    if (error) {
-      toast.error('Erro ao carregar dados');
-    } else {
-      setData(result || []);
+    try {
+      const { data: result, error } = await supabase.from(table).select('*').order('created_at', { ascending: false });
+      if (error) {
+        console.error(`Erro ao buscar dados da tabela ${table}:`, {
+          code: error.code,
+          message: error.message,
+          details: error.details
+        });
+        toast.error(`Erro ao carregar dados: ${error.message}`);
+      } else {
+        setData(result || []);
+      }
+    } catch (err: any) {
+      console.error('Exceção ao buscar dados:', err);
+      toast.error('Erro inesperado ao carregar dados');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   useEffect(() => {
@@ -73,7 +103,7 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
       finalValue = value === 'true' || value === true;
     }
 
-    // Evitar disparar recálculos se o valor não mudou de fato (ex: 10 vs 10.0)
+    // Evitar disparar recálculos se o valor não mudou de fato
     if (row[columnId] === finalValue) return;
 
     const updatedRow = { ...row, [columnId]: finalValue };
@@ -96,14 +126,21 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
     try {
       const updatePayload: any = { [columnId]: finalValue };
       
-      // Se for ingrediente e mudou preço/peso, envia também o preço unitário calculado
       if (table === 'ingredientes' && updatedRow.preco_por_unidade_base !== undefined) {
         updatePayload.preco_por_unidade_base = updatedRow.preco_por_unidade_base;
       }
 
       const { error } = await supabase.from(table).update(updatePayload).eq('id', row.id);
       
-      if (error) throw error;
+      if (error) {
+        console.error(`ERRO SUPABASE AO ATUALIZAR ${table}:`, {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint
+        });
+        throw error;
+      }
 
       // Trigger recalculations
       if (table === 'ingredientes' && (columnId === 'preco_embalagem' || columnId === 'peso_embalagem' || columnId === 'unidade_embalagem')) {
@@ -112,7 +149,7 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
       } else if (table === 'produtos' && [
         'categoria_id', 'usar_margem_categoria', 'margem_percentual', 
         'margem_tipo', 'usar_preco_manual', 'preco_venda_manual', 
-        'rendimento_unidades', 'tempo_producao_unidade' // Adicionado unidade de tempo
+        'rendimento_unidades', 'tempo_producao_unidade'
       ].includes(columnId)) {
         try {
           const updatedProduct = await recalculateProduct(row.id, supabase);
@@ -120,7 +157,7 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
             setData(old => old.map(r => r.id === row.id ? updatedProduct : r));
           }
         } catch (err) {
-          toast.error(`Erro ao recalcular produto: ${row.nome || row.id}`);
+          console.error(`Erro ao recalcular produto ${row.id}:`, err);
         }
         if (onDataChange) onDataChange();
       } else if (table === 'categorias' && (columnId === 'margem_padrao' || columnId === 'tipo_margem')) {
@@ -131,8 +168,8 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
       }
     } catch (error: any) {
       console.error(`Erro ao atualizar tabela ${table}, campo ${columnId}:`, error);
-      toast.error(`Erro ao atualizar: ${error.message}`);
-      setData(originalData); // Reversão de estado em caso de erro (v004 fix)
+      toast.error(`Erro no Banco (${error.code || '?' }): ${error.message}`);
+      setData(originalData);
     } finally {
       setSavingRows(prev => {
         const next = new Set(prev);
@@ -143,7 +180,11 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
   };
 
   const addRow = async () => {
-    // Garante valores padrão para evitar erros de restrição (NOT NULL) no banco
+    if (!user?.id) {
+      toast.error('Você precisa estar logado para adicionar itens');
+      return;
+    }
+
     const newRow: any = {
       nome: 'Novo Item',
       descricao: '',
@@ -167,10 +208,10 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
       segmento: '',
       telefone: '',
       email: '',
-      observacoes: ''
+      observacoes: '',
+      user_id: user.id // Blindagem: Incluindo user_id explicitamente
     };
     
-    // Ajustes específicos por tabela
     if (table === 'despesas_fixas') {
       newRow.descricao = 'Nova Despesa';
     } else if (table === 'clientes') {
@@ -186,21 +227,25 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
       newRow.tipo_margem = 'markup';
     }
 
-    const { data: result, error } = await supabase.from(table).insert([newRow]).select();
-    
-    if (error) {
-      // Log detalhado para diagnosticar Foreign Key ou restrições de banco
-      console.error(`ERRO CRÍTICO ao adicionar na tabela ${table}:`, {
-        code: error.code,
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-        payload: newRow
-      });
-      toast.error(`Erro ao adicionar: ${error.message}`);
-    } else if (result && result.length > 0) {
-      setData(old => [result[0], ...old]);
-      toast.success('Adicionado com sucesso');
+    try {
+      const { data: result, error } = await supabase.from(table).insert([newRow]).select();
+      
+      if (error) {
+        console.error(`ERRO SUPABASE AO ADICIONAR EM ${table}:`, {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          payload: newRow
+        });
+        toast.error(`Erro no Banco (${error.code}): ${error.message}`);
+      } else if (result && result.length > 0) {
+        setData(old => [result[0], ...old]);
+        toast.success('Adicionado com sucesso');
+      }
+    } catch (err: any) {
+      console.error('Exceção ao adicionar registro:', err);
+      toast.error(`Erro inesperado: ${err.message}`);
     }
   };
 
@@ -209,37 +254,47 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
       const { error } = await supabase.from(table).delete().eq('id', id);
       
       if (error) {
-        // Tratamento robusto para violação de chave estrangeira (Foreign Key Constraint)
+        console.error(`ERRO SUPABASE AO DELETAR EM ${table}:`, {
+          code: error.code,
+          message: error.message,
+          details: error.details
+        });
+        
         if (error.code === '23503') {
           toast.error('Não é possível excluir: este item está sendo usado em um produto ou ficha técnica.');
           return;
         }
-        throw error;
+        toast.error(`Erro no Banco (${error.code}): ${error.message}`);
+        return;
       }
 
       setData(old => old.filter(row => row.id !== id));
       toast.success('Deletado');
     } catch (err: any) {
       console.error('Erro ao deletar:', err);
-      toast.error(`Erro ao deletar: ${err.message || 'Erro desconhecido'}`);
+      toast.error(`Erro inesperado: ${err.message}`);
     }
   };
 
   const handleRecalculateAll = async () => {
+    if (isRecalculating) return;
+    
+    setIsRecalculating(true);
     const loadingToast = toast.loading('Recalculando todos os produtos...');
     try {
       await recalculateAllProducts(supabase);
-      await fetchData(); // Atualiza o grid com os novos valores
+      await fetchData();
       toast.success('Todos os produtos foram recalculados!', { id: loadingToast });
       if (onDataChange) onDataChange();
     } catch (err: any) {
       console.error('Erro no recálculo global:', err);
-      toast.error('Erro ao recalcular produtos.', { id: loadingToast });
+      toast.error(`Erro no recálculo: ${err.message}`, { id: loadingToast });
+    } finally {
+      setIsRecalculating(false);
     }
   };
 
   const handlePaste = async (e: React.ClipboardEvent) => {
-    // Only handle paste if not currently focused on an input/select (to avoid double handling)
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) {
       return;
     }
@@ -248,11 +303,9 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
     const clipboardData = e.clipboardData.getData('text');
     const rawRows = clipboardData.split(/\r?\n/);
     
-    // Filter out empty rows and skip headers
     const rows = rawRows.filter(row => {
       const trimmed = row.trim();
       if (!trimmed) return false;
-      // Skip common header keywords
       const lower = trimmed.toLowerCase();
       if (lower.startsWith('nome\t') || lower.startsWith('descrição\t') || lower.startsWith('ingrediente\t')) return false;
       return true;
@@ -263,7 +316,6 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
     const loadingToast = toast.loading(`Importando ${rows.length} registros...`);
     
     try {
-      // Fetch categories once if we are in products to map names to IDs
       let categoryMap: Record<string, string> = {};
       if (table === 'produtos') {
         const { data: cats } = await supabase.from('categorias').select('id, nome');
@@ -272,7 +324,6 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
         });
       }
 
-      // Only map to columns that are actually editable (have an accessorKey and are not calculated)
       const editableColumns = initialColumns.filter(col => 
         (col.accessorKey || col.id) && 
         col.id !== 'actions' &&
@@ -285,9 +336,9 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
       
       for (const rowText of rows) {
         const cells = rowText.split('\t');
-        if (cells.length < 2 && cells[0].trim() === '') continue; // Skip empty rows
+        if (cells.length < 1 && cells[0].trim() === '') continue;
 
-        const rowData: any = {};
+        const rowData: any = { user_id: user?.id };
         
         for (let index = 0; index < editableColumns.length; index++) {
           const col = editableColumns[index];
@@ -295,14 +346,12 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
             const key = col.accessorKey || col.id;
             let value: any = cells[index].trim();
             
-            // Handle Category mapping (name to ID)
             if (key === 'categoria_id' && isNaN(value as any)) {
               const catId = categoryMap[value.toLowerCase()];
               if (catId) {
                 value = catId;
               } else if (value && value.length > 1) {
-                // Create new category on the fly
-                const { data: newCat } = await supabase.from('categorias').insert([{ nome: value }]).select();
+                const { data: newCat } = await supabase.from('categorias').insert([{ nome: value, user_id: user?.id }]).select();
                 if (newCat && newCat[0]) {
                   categoryMap[value.toLowerCase()] = newCat[0].id;
                   value = newCat[0].id;
@@ -312,7 +361,6 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
               }
             }
 
-            // Handle Unit mapping
             if (key === 'unidade_embalagem') {
               const unit = value.toLowerCase();
               if (unit.includes('grama') || unit === 'g') value = 'g';
@@ -322,7 +370,6 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
               else if (unit.includes('unid') || unit === 'un') value = 'un';
             }
 
-            // Basic type conversion for numbers
             const stringFields = [
               'nome', 'descricao', 'fornecedor', 'unidade_embalagem', 
               'margem_tipo', 'categoria_id', 'email', 'telefone', 
@@ -346,13 +393,10 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
           }
         }
 
-        // Add default values based on table
         if (table === 'ingredientes') {
           rowData.unidade_embalagem = rowData.unidade_embalagem || 'g';
           rowData.peso_embalagem = rowData.peso_embalagem || 1000;
           rowData.preco_embalagem = rowData.preco_embalagem || 0;
-          
-          // Calculate unit price if possible
           rowData.preco_por_unidade_base = calculateIngredientUnitPrice(
             rowData.preco_embalagem || 0,
             rowData.peso_embalagem || 1000,
@@ -382,14 +426,18 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
 
       const { data: insertedData, error } = await supabase.from(table).insert(rowsToInsert).select();
       
-      if (error) throw error;
+      if (error) {
+        console.error(`ERRO SUPABASE NA IMPORTAÇÃO EM ${table}:`, {
+          code: error.code,
+          message: error.message,
+          details: error.details
+        });
+        throw error;
+      }
 
       setData(prev => [...(insertedData || []), ...prev]);
       
-      // Trigger recalculations after bulk import
-      if (table === 'ingredientes') {
-        await recalculateAllProducts(supabase);
-      } else if (table === 'categorias') {
+      if (table === 'ingredientes' || table === 'categorias') {
         await recalculateAllProducts(supabase);
       }
 
@@ -397,7 +445,7 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
       if (onDataChange) onDataChange();
     } catch (error: any) {
       console.error('Erro ao colar dados:', error);
-      toast.error(`Erro na importação: ${error.message}`, { id: loadingToast });
+      toast.error(`Erro na importação (${error.code || '?'}): ${error.message}`, { id: loadingToast });
     }
   };
 
@@ -436,7 +484,7 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
       id={`grid-container-${table}`}
       className="bg-surface-container-lowest rounded-xl border border-surface-container-high shadow-sm overflow-hidden outline-none"
       onPaste={handlePaste}
-      tabIndex={0} // Make it focusable to receive paste events
+      tabIndex={0}
     >
       <div className="p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-surface-container-high">
         <h2 className="text-xl font-bold headline text-on-surface">{title}</h2>
@@ -458,14 +506,15 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
             <Plus size={16} /> Adicionar
           </button>
           
-          {/* Botão Recalcular Tudo restaurado */}
           {(table === 'produtos' || table === 'ingredientes' || table === 'categorias') && (
             <button 
               onClick={handleRecalculateAll}
+              disabled={isRecalculating}
               title="Recalcular todos os custos e preços"
-              className="flex items-center gap-2 px-4 py-2 bg-surface-container-high text-on-surface font-bold rounded-lg text-sm hover:bg-surface-container-highest transition-all"
+              className="flex items-center gap-2 px-4 py-2 bg-surface-container-high text-on-surface font-bold rounded-lg text-sm hover:bg-surface-container-highest transition-all disabled:opacity-50"
             >
-              <RefreshCw size={16} /> Recalcular Tudo
+              <RefreshCw size={16} className={isRecalculating ? 'animate-spin' : ''} /> 
+              {isRecalculating ? 'Recalculando...' : 'Recalcular Tudo'}
             </button>
           )}
 
@@ -478,7 +527,6 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
         </div>
       </div>
 
-      {/* Prominent Paste Zone */}
       <div 
         onClick={() => {
           const container = document.getElementById(`grid-container-${table}`);
@@ -592,6 +640,7 @@ export const SelectCell = ({ getValue, row: { index }, column: { id }, table, op
 
 // Category Cell Component (with inline creation)
 export const CategoryCell = ({ getValue, row: { index }, column: { id }, table }: any) => {
+  const { user } = useAuth();
   const initialValue = getValue();
   const [value, setValue] = useState(initialValue);
   const [categories, setCategories] = useState<any[]>([]);
@@ -624,9 +673,10 @@ export const CategoryCell = ({ getValue, row: { index }, column: { id }, table }
   const handleCreate = async () => {
     if (!newCategory.trim()) return;
     
-    const { data, error } = await supabase.from('categorias').insert([{ nome: newCategory }]).select();
+    const { data, error } = await supabase.from('categorias').insert([{ nome: newCategory, user_id: user?.id }]).select();
     if (error) {
-      toast.error('Erro ao criar categoria');
+      console.error('Erro ao criar categoria:', error);
+      toast.error(`Erro ao criar categoria: ${error.message}`);
     } else {
       const created = data[0];
       setCategories(prev => [...prev, created].sort((a, b) => a.nome.localeCompare(b.nome)));
