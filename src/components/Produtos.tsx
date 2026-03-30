@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
+import { dataService } from '../services/dataService';
 import { 
   Plus, 
   Search, 
@@ -42,47 +42,26 @@ export const Produtos = () => {
 
   const fetchData = async () => {
     setLoading(true);
-    const [prodRes, catRes] = await Promise.all([
-      supabase.from('produtos').select('*').order('nome'),
-      supabase.from('categorias').select('*').order('nome')
-    ]);
-    
-    if (prodRes.error || catRes.error) {
+    try {
+      const [prodRes, catRes] = await Promise.all([
+        dataService.getProdutos(),
+        dataService.getCategorias()
+      ]);
+      
+      setProdutos(prodRes);
+      setCategorias(catRes);
+    } catch (error) {
       toast.error('Erro ao carregar dados');
-    } else {
-      setProdutos(prodRes.data || []);
-      setCategorias(catRes.data || []);
+      console.error(error);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const fetchProductIngredients = async (productId: string) => {
     try {
-      const { data, error } = await supabase
-        .from('produto_ingredientes')
-        .select(`
-          *,
-          ingrediente:ingredientes!ingrediente_id(*)
-        `)
-        .eq('produto_id', productId);
-      
-      if (error) {
-        console.error('Erro ao carregar ficha técnica (join failure):', error);
-        // Fallback: try without join if join fails
-        const { data: simpleData, error: simpleError } = await supabase
-          .from('produto_ingredientes')
-          .select('*')
-          .eq('produto_id', productId);
-        
-        if (simpleError) {
-          console.error('Erro ao carregar ficha técnica (simple fetch failure):', simpleError);
-          toast.error('Erro ao carregar ficha técnica');
-        } else {
-          setProductIngredients(simpleData || []);
-        }
-      } else {
-        setProductIngredients(data || []);
-      }
+      const data = await dataService.getProdutoIngredientes(productId);
+      setProductIngredients(data);
     } catch (err) {
       console.error('Erro inesperado ao carregar ficha técnica:', err);
       toast.error('Erro ao carregar ficha técnica');
@@ -109,11 +88,12 @@ export const Produtos = () => {
   const handleDeleteProduct = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     if (window.confirm('Tem certeza que deseja excluir este produto?')) {
-      const { error } = await supabase.from('produtos').delete().eq('id', id);
-      if (error) toast.error('Erro ao excluir produto');
-      else {
+      try {
+        await dataService.deleteProduto(id);
         toast.success('Produto excluído');
         fetchData();
+      } catch (error) {
+        toast.error('Erro ao excluir produto');
       }
     }
   };
@@ -148,13 +128,12 @@ export const Produtos = () => {
               
               // Explicitly fetch the updated product to ensure UI is in sync
               if (selectedProduct?.id) {
-                const { data } = await supabase
-                  .from('produtos')
-                  .select('*')
-                  .eq('id', selectedProduct.id)
-                  .single();
-                
-                if (data) setSelectedProduct(data);
+                try {
+                  const data = await dataService.getProdutoById(selectedProduct.id);
+                  setSelectedProduct(data);
+                } catch (error) {
+                  console.error('Error refreshing product:', error);
+                }
               }
             }}
           />
@@ -197,18 +176,15 @@ export const Produtos = () => {
             className="bg-white rounded-2xl shadow-sm border border-surface-container-high hover:shadow-md transition-all group cursor-pointer overflow-hidden flex flex-col"
           >
             <div className="aspect-video bg-surface-container-low relative overflow-hidden">
-              {produto.imagem_url ? (
-                <img 
-                  src={produto.imagem_url} 
-                  alt={produto.nome} 
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-on-surface-variant/30">
-                  <Package size={48} />
-                </div>
-              )}
+              <img 
+                src={produto.imagem_url || "/images/default-box.png"} 
+                alt={produto.nome} 
+                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = "https://picsum.photos/seed/bakery/400/300";
+                }}
+              />
               <div className="absolute top-3 right-3 px-2 py-1 bg-white/90 backdrop-blur-sm rounded-lg text-[10px] font-bold text-primary border border-primary/20">
                 {getCategoryName(produto.categoria_id)}
               </div>
@@ -267,13 +243,12 @@ export const Produtos = () => {
             
             // If we are in detail view, refresh the selected product
             if (showDetail && selectedProduct?.id) {
-              const { data } = await supabase
-                .from('produtos')
-                .select('*')
-                .eq('id', selectedProduct.id)
-                .single();
-              
-              if (data) setSelectedProduct(data);
+              try {
+                const data = await dataService.getProdutoById(selectedProduct.id);
+                setSelectedProduct(data);
+              } catch (error) {
+                console.error('Error refreshing product:', error);
+              }
             }
           }}
         />
@@ -325,18 +300,15 @@ const ProductDetail = ({ product, ingredients, onBack, onEdit }: { product: Prod
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Left: Product Image & Main Info */}
         <div className="relative aspect-square lg:aspect-auto lg:h-[450px] rounded-3xl overflow-hidden shadow-2xl group">
-          {product.imagem_url ? (
-            <img 
-              src={product.imagem_url} 
-              alt={product.nome} 
-              className="w-full h-full object-cover"
-              referrerPolicy="no-referrer"
-            />
-          ) : (
-            <div className="w-full h-full bg-surface-container-low flex items-center justify-center text-on-surface-variant/20">
-              <Package size={120} />
-            </div>
-          )}
+          <img 
+            src={product.imagem_url || "/images/default-box.png"} 
+            alt={product.nome} 
+            className="w-full h-full object-cover"
+            referrerPolicy="no-referrer"
+            onError={(e) => {
+              (e.target as HTMLImageElement).src = "https://picsum.photos/seed/bakery/800/600";
+            }}
+          />
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent flex flex-col justify-end p-8">
             <span className="bg-primary text-white text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full w-fit mb-3">
               Best Seller

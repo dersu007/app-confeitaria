@@ -1,32 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
+import { dataService } from '../services/dataService';
 import { useAuth } from '../lib/auth';
 import { Produto, ProdutoIngrediente, Ingrediente } from '../types';
 import { 
   formatCurrency, 
-  calculateRecipeIngredientCost, 
-  recalculateProduct
+  calculateRecipeIngredientCost
 } from '../services/bakeryService';
 import { X, Trash2, Plus, RefreshCw, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
-
-/*
-  SQL PARA SUPABASE (RLS POLICIES):
-  
-  -- Habilitar RLS para todas as tabelas
-  ALTER TABLE ingredientes ENABLE ROW LEVEL SECURITY;
-  ALTER TABLE produtos ENABLE ROW LEVEL SECURITY;
-  ALTER TABLE produto_ingredientes ENABLE ROW LEVEL SECURITY;
-  ALTER TABLE categorias ENABLE ROW LEVEL SECURITY;
-  ALTER TABLE despesas_fixas ENABLE ROW LEVEL SECURITY;
-  ALTER TABLE clientes ENABLE ROW LEVEL SECURITY;
-
-  -- Criar políticas de acesso (Exemplo para produto_ingredientes)
-  CREATE POLICY "Permitir tudo para usuários autenticados" ON produto_ingredientes FOR ALL TO authenticated USING (true) WITH CHECK (true);
-  CREATE POLICY "Permitir tudo para usuários autenticados" ON ingredientes FOR ALL TO authenticated USING (true) WITH CHECK (true);
-  CREATE POLICY "Permitir tudo para usuários autenticados" ON produtos FOR ALL TO authenticated USING (true) WITH CHECK (true);
-  CREATE POLICY "Permitir tudo para usuários autenticados" ON categorias FOR ALL TO authenticated USING (true) WITH CHECK (true);
-*/
 
 interface FichaTecnicaProps {
   product: Produto;
@@ -50,19 +31,15 @@ export const FichaTecnica = ({ product: initialProduct, onClose, onUpdate }: Fic
     if (!initialProduct.id) return;
     setLoading(true);
     try {
-      const [ingRes, recRes, prodRes] = await Promise.all([
-        supabase.from('ingredientes').select('*').order('nome'),
-        supabase.from('produto_ingredientes').select('*, ingrediente:ingredientes(*)').eq('produto_id', initialProduct.id),
-        supabase.from('produtos').select('*').eq('id', initialProduct.id).single()
+      const [ingData, recData, prodData] = await Promise.all([
+        dataService.getIngredientes(),
+        dataService.getProdutoIngredientes(initialProduct.id),
+        dataService.getProdutoById(initialProduct.id)
       ]);
 
-      if (ingRes.error) throw ingRes.error;
-      if (recRes.error) throw recRes.error;
-      if (prodRes.error) throw prodRes.error;
-
-      setIngredients(ingRes.data || []);
-      setProdutoIngredientes(recRes.data || []);
-      setCurrentProduct(prodRes.data);
+      setIngredients(ingData);
+      setProdutoIngredientes(recData);
+      if (prodData) setCurrentProduct(prodData);
     } catch (error: any) {
       console.error('Erro ao carregar dados da ficha técnica:', error);
       toast.error('Erro ao carregar dados');
@@ -93,15 +70,10 @@ export const FichaTecnica = ({ product: initialProduct, onClose, onUpdate }: Fic
     };
 
     try {
-      const { data, error } = await supabase
-        .from('produto_ingredientes')
-        .insert([newItem])
-        .select('*, ingrediente:ingredientes(*)');
-
-      if (error) throw error;
+      const savedItem = await dataService.saveProdutoIngrediente(newItem);
       
-      if (data && data.length > 0) {
-        setProdutoIngredientes(prev => [...prev, data[0]]);
+      if (savedItem) {
+        setProdutoIngredientes(prev => [...prev, savedItem]);
         await updateProductTotals();
         toast.success('Ingrediente adicionado');
       }
@@ -139,6 +111,8 @@ export const FichaTecnica = ({ product: initialProduct, onClose, onUpdate }: Fic
       : 0;
 
     const updatePayload = {
+      id,
+      produto_id: initialProduct.id,
       ingrediente_id: ingredientId,
       quantidade: quantity,
       unidade: unit,
@@ -149,8 +123,7 @@ export const FichaTecnica = ({ product: initialProduct, onClose, onUpdate }: Fic
     setProdutoIngredientes(prev => prev.map(i => i.id === id ? { ...i, ...updatePayload, ingrediente: ingredient } : i));
 
     try {
-      const { error } = await supabase.from('produto_ingredientes').update(updatePayload).eq('id', id);
-      if (error) throw error;
+      await dataService.saveProdutoIngrediente(updatePayload);
       await updateProductTotals();
     } catch (err: any) {
       console.error('Erro ao atualizar item:', err);
@@ -161,8 +134,7 @@ export const FichaTecnica = ({ product: initialProduct, onClose, onUpdate }: Fic
 
   const deleteItem = async (id: string) => {
     try {
-      const { error } = await supabase.from('produto_ingredientes').delete().eq('id', id);
-      if (error) throw error;
+      await dataService.deleteProdutoIngrediente(id, currentProduct.id);
       
       setProdutoIngredientes(prev => prev.filter(i => i.id !== id));
       await updateProductTotals();
@@ -175,7 +147,11 @@ export const FichaTecnica = ({ product: initialProduct, onClose, onUpdate }: Fic
 
   const updateProductTotals = async () => {
     try {
-      const updatedProduct = await recalculateProduct(initialProduct.id, supabase);
+      // Recalculate product costs and pricing
+      await dataService.recalculateProduct(initialProduct.id);
+      
+      // Fetch fresh data
+      const updatedProduct = await dataService.getProdutoById(initialProduct.id);
       if (updatedProduct) {
         setCurrentProduct(updatedProduct);
       }

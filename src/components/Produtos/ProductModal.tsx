@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../../lib/supabase';
+import { dataService } from '../../services/dataService';
+import { useAuth } from '../../lib/auth';
 import { Produto, Categoria } from '../../types';
 import { X, Plus, Package, Image, Clock, Calculator, Save, Weight, DollarSign } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { formatCurrency, calculateProductPricing, calculateUnitCost, resolveProductMargin, recalculateProduct, sanitizeProductUpdate } from '../../services/bakeryService';
+import { formatCurrency, calculateProductPricing, calculateUnitCost, resolveProductMargin } from '../../services/bakeryService';
 import { FichaTecnica } from '../FichaTecnica';
 
 interface ProductModalProps {
@@ -13,6 +14,7 @@ interface ProductModalProps {
 }
 
 export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) => {
+  const { user } = useAuth();
   const [nome, setNome] = useState(produto?.nome || '');
   const [categoriaId, setCategoriaId] = useState(produto?.categoria_id || '');
   const [imagemUrl, setImagemUrl] = useState(produto?.imagem_url || '');
@@ -22,6 +24,9 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
   const [pesoFinal, setPesoFinal] = useState(produto?.peso_final_produto || 0);
   const [custoHoraTrabalho, setCustoHoraTrabalho] = useState(produto?.custo_hora_trabalho || 0);
   const [custoFixoRateado, setCustoFixoRateado] = useState(produto?.custo_fixo_rateado || 0);
+  const [custoEmbalagem, setCustoEmbalagem] = useState(produto?.custo_embalagem || 0);
+  const [taxaVendaPercentual, setTaxaVendaPercentual] = useState(produto?.taxa_venda_percentual || 0);
+  const [impostoPercentual, setImpostoPercentual] = useState(produto?.imposto_percentual || 0);
   
   const [usarPrecoManual, setUsarPrecoManual] = useState(produto?.usar_preco_manual || false);
   const [precoVendaManual, setPrecoVendaManual] = useState(produto?.preco_venda_manual || 0);
@@ -41,17 +46,20 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
   }, [produto]);
 
   const fetchIngredientsCost = async () => {
-    const { data } = await supabase.from('produto_ingredientes').select('custo_calculado').eq('produto_id', produto?.id);
-    if (data) {
-      const total = data.reduce((acc, item) => acc + (item.custo_calculado || 0), 0);
-      setCustoInsumos(total);
+    try {
+      const data = await dataService.getProdutoIngredientes(produto?.id!);
+      if (data) {
+        const total = data.reduce((acc, item) => acc + (item.custo_calculado || 0), 0);
+        setCustoInsumos(total);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar custo de ingredientes:', error);
     }
   };
 
   const fetchData = async () => {
     try {
-      const { data, error } = await supabase.from('categorias').select('*').order('nome');
-      if (error) throw error;
+      const data = await dataService.getCategorias();
       setCategorias(data || []);
     } catch (error: any) {
       console.error('Erro ao carregar categorias:', error);
@@ -75,7 +83,10 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
     activeMargin.margem,
     activeMargin.tipo,
     usarPrecoManual,
-    precoVendaManual
+    precoVendaManual,
+    custoEmbalagem,
+    taxaVendaPercentual,
+    impostoPercentual
   );
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -89,6 +100,8 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
 
     try {
       const rawProductData = {
+        id: produto?.id,
+        user_id: produto?.user_id || user?.id,
         nome,
         categoria_id: categoriaId,
         imagem_url: imagemUrl,
@@ -96,6 +109,9 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
         custo_hora_trabalho: custoHoraTrabalho,
         custo_mao_obra: laborCost,
         custo_fixo_rateado: custoFixoRateado,
+        custo_embalagem: custoEmbalagem,
+        taxa_venda_percentual: taxaVendaPercentual,
+        imposto_percentual: impostoPercentual,
         modo_preparo: modoPreparo,
         rendimento_unidades: rendimentoUnidades,
         peso_final_produto: pesoFinal,
@@ -113,32 +129,12 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
         custo_unitario_snapshot: currentUnitCost
       };
 
-      const productData = sanitizeProductUpdate(rawProductData);
+      const savedProduct = await dataService.saveProduto(rawProductData as any);
       
-      // Log updateData for debugging as requested
-      console.log('Update Data:', productData);
-
-      if (Object.keys(productData).length === 0) {
-        throw new Error("O objeto de atualização está vazio.");
-      }
-
-      let productId = produto?.id;
-
-      if (productId) {
-        // Ensure productId is valid before update
-        if (!productId) throw new Error("Produto sem ID para atualização");
-        
-        const { error } = await supabase.from('produtos').update(productData).eq('id', productId);
-        if (error) throw error;
-      } else {
-        const { data, error } = await supabase.from('produtos').insert([productData]).select();
-        if (error) throw error;
-        if (!data || data.length === 0) throw new Error("Erro ao inserir produto");
-        productId = data[0].id;
-      }
+      if (!savedProduct) throw new Error("Erro ao salvar produto");
 
       // Recalculate after save to ensure all totals are correct
-      await recalculateProduct(productId, supabase);
+      await dataService.recalculateProduct(savedProduct.id);
 
       toast.success('Produto salvo com sucesso!', { id: loadingToast });
       
@@ -264,6 +260,45 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
                   onChange={e => setCustoFixoRateado(Number(e.target.value))}
                   className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
                 />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest flex items-center gap-1.5">
+                    <Package size={12} /> Custo Embalagem (R$)
+                  </label>
+                  <input 
+                    type="number"
+                    step="0.01"
+                    value={custoEmbalagem}
+                    onChange={e => setCustoEmbalagem(Number(e.target.value))}
+                    className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest flex items-center gap-1.5">
+                    <Calculator size={12} /> Taxas (%)
+                  </label>
+                  <input 
+                    type="number"
+                    step="0.1"
+                    value={taxaVendaPercentual}
+                    onChange={e => setTaxaVendaPercentual(Number(e.target.value))}
+                    className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest flex items-center gap-1.5">
+                    <Calculator size={12} /> Impostos (%)
+                  </label>
+                  <input 
+                    type="number"
+                    step="0.1"
+                    value={impostoPercentual}
+                    onChange={e => setImpostoPercentual(Number(e.target.value))}
+                    className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
               </div>
 
               <div className="space-y-1.5">
@@ -464,9 +499,13 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
           onUpdate={() => {
             // Recalculate cost when ingredients change
             const fetchNewCost = async () => {
-              const { data } = await supabase.from('produtos').select('custo_total').eq('id', produto.id).single();
-              if (data) setCustoInsumos(data.custo_total - laborCost - fixedCost);
-              fetchIngredientsCost();
+              try {
+                const data = await dataService.getProdutoById(produto.id);
+                if (data) setCustoInsumos(data.custo_total - laborCost - fixedCost);
+                fetchIngredientsCost();
+              } catch (error) {
+                console.error('Erro ao atualizar custo após mudança na ficha técnica:', error);
+              }
             };
             fetchNewCost();
           }}

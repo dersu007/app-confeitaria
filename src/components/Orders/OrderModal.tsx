@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../../lib/supabase';
+import { dataService } from '../../services/dataService';
 import { Cliente, Produto, Pedido, PedidoItem, PedidoExtra, CategoriaExtra } from '../../types';
 import { 
   X, 
@@ -47,19 +47,20 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
   }, []);
 
   const fetchInitialData = async () => {
-    const [
-      { data: clientsData },
-      { data: productsData },
-      { data: extrasCatsData }
-    ] = await Promise.all([
-      supabase.from('clientes').select('*').order('nome'),
-      supabase.from('produtos').select('*').order('nome'),
-      supabase.from('categorias_extras').select('*').order('nome')
-    ]);
+    try {
+      const [clientsData, productsData, extrasCatsData] = await Promise.all([
+        dataService.getClientes(),
+        dataService.getProdutos(),
+        dataService.getCategoriasExtras()
+      ]);
 
-    setClientes(clientsData || []);
-    setProdutos(productsData || []);
-    setExtraCategories(extrasCatsData || []);
+      setClientes(clientsData);
+      setProdutos(productsData);
+      setExtraCategories(extrasCatsData);
+    } catch (error) {
+      console.error('Error fetching initial order data:', error);
+      toast.error('Erro ao carregar dados iniciais');
+    }
   };
 
   const addItem = (produto: Produto) => {
@@ -124,6 +125,7 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
 
     try {
       const pedidoData = {
+        id: pedido?.id,
         cliente_id: clienteId,
         data_pedido: new Date(dataPedido).toISOString(),
         status,
@@ -133,21 +135,15 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
         valor_total: valorTotal
       };
 
-      let pedidoId = pedido?.id;
+      const savedPedido = await dataService.savePedido(pedidoData);
+      const pedidoId = savedPedido.id;
 
-      if (pedidoId) {
-        const { error: updateError } = await supabase.from('pedidos').update(pedidoData).eq('id', pedidoId);
-        if (updateError) throw updateError;
-        
-        // Clear existing items and extras for update (simplest way)
+      if (pedido?.id) {
+        // Clear existing items and extras for update
         await Promise.all([
-          supabase.from('pedidos_itens').delete().eq('pedido_id', pedidoId),
-          supabase.from('pedidos_extras').delete().eq('pedido_id', pedidoId)
+          dataService.deletePedidoItens(pedidoId),
+          dataService.deletePedidoExtras(pedidoId)
         ]);
-      } else {
-        const { data: newPedido, error: insertError } = await supabase.from('pedidos').insert([pedidoData]).select();
-        if (insertError) throw insertError;
-        pedidoId = newPedido[0].id;
       }
 
       // Insert items
@@ -160,8 +156,7 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
         subtotal: item.subtotal
       }));
 
-      const { error: itemsError } = await supabase.from('pedidos_itens').insert(itemsToInsert);
-      if (itemsError) throw itemsError;
+      await dataService.savePedidoItens(itemsToInsert);
 
       // Insert extras
       if (extras.length > 0) {
@@ -171,8 +166,7 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
           categoria: extra.categoria,
           valor: extra.valor
         }));
-        const { error: extrasError } = await supabase.from('pedidos_extras').insert(extrasToInsert);
-        if (extrasError) throw extrasError;
+        await dataService.savePedidoExtras(extrasToInsert);
       }
 
       toast.success('Pedido salvo com sucesso!', { id: loadingToast });

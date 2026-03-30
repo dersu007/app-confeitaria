@@ -19,8 +19,7 @@ import {
   Pie,
   Cell
 } from 'recharts';
-import { formatCurrency } from '../services/bakeryService';
-import { supabase } from '../lib/supabase';
+import { dataService } from '../services/dataService';
 import { Produto } from '../types';
 
 const KPICard = ({ title, value, change, icon: Icon, trend }: any) => (
@@ -48,9 +47,14 @@ export const Dashboard = () => {
 
   useEffect(() => {
     const fetchData = async () => {
-      const { data } = await supabase.from('produtos').select('*');
-      if (data) setProdutos(data);
-      setLoading(false);
+      try {
+        const data = await dataService.getProdutos();
+        setProdutos(data);
+      } catch (error) {
+        console.error('Error fetching dashboard data:', error);
+      } finally {
+        setLoading(false);
+      }
     };
     fetchData();
   }, []);

@@ -6,15 +6,12 @@ import {
   flexRender,
   createColumnHelper,
 } from '@tanstack/react-table';
-import { supabase } from '../lib/supabase';
+import { dataService } from '../services/dataService';
 import { useAuth } from '../lib/auth';
 import { Plus, Trash2, Save, RefreshCw, Search, ClipboardPaste } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { 
-  calculateIngredientUnitPrice, 
-  recalculateProductsUsingIngredient, 
-  recalculateProduct, 
-  recalculateAllProducts 
+  calculateIngredientUnitPrice
 } from '../services/bakeryService';
 
 /*
@@ -51,20 +48,11 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
   const fetchData = async () => {
     setLoading(true);
     try {
-      const { data: result, error } = await supabase.from(table).select('*').order('created_at', { ascending: false });
-      if (error) {
-        console.error(`Erro ao buscar dados da tabela ${table}:`, {
-          code: error.code,
-          message: error.message,
-          details: error.details
-        });
-        toast.error(`Erro ao carregar dados: ${error.message}`);
-      } else {
-        setData(result || []);
-      }
+      const result = await dataService.getTableData(table);
+      setData(result);
     } catch (err: any) {
-      console.error('Exceção ao buscar dados:', err);
-      toast.error('Erro inesperado ao carregar dados');
+      console.error(`Erro ao buscar dados da tabela ${table}:`, err);
+      toast.error(`Erro ao carregar dados: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -82,10 +70,11 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
     // Type conversion for numeric fields
     const numericFields = [
       'peso_embalagem', 'preco_embalagem', 'preco_por_unidade_base',
-      'tempo_producao_valor', 'rendimento_unidades', 'preco_venda_manual',
+      'tempo_producao', 'rendimento_unidades', 'preco_venda_manual',
       'margem_percentual', 'custo_total_calculado', 'quantidade',
       'margem_padrao', 'valor_mensal', 'custo_embalagem', 
-      'taxa_venda_percentual', 'imposto_percentual'
+      'taxa_venda_percentual', 'imposto_percentual',
+      'custo_hora_trabalho', 'custo_fixo_rateado', 'custo_total', 'custo_unitario'
     ];
 
     const booleanFields = ['usar_margem_categoria', 'usar_preco_manual'];
@@ -125,36 +114,28 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
     setSavingRows(prev => new Set(prev).add(row.id));
 
     try {
-      const updatePayload: any = { [columnId]: finalValue };
+      const updatePayload: any = { id: row.id, [columnId]: finalValue };
       
       if (table === 'ingredientes' && updatedRow.preco_por_unidade_base !== undefined) {
         updatePayload.preco_por_unidade_base = updatedRow.preco_por_unidade_base;
       }
 
-      const { error } = await supabase.from(table).update(updatePayload).eq('id', row.id);
+      await dataService.saveEntity(table, updatePayload);
       
-      if (error) {
-        console.error(`ERRO SUPABASE AO ATUALIZAR ${table}:`, {
-          code: error.code,
-          message: error.message,
-          details: error.details,
-          hint: error.hint
-        });
-        throw error;
-      }
-
       // Trigger recalculations
       if (table === 'ingredientes' && (columnId === 'preco_embalagem' || columnId === 'peso_embalagem' || columnId === 'unidade_embalagem')) {
-        await recalculateProductsUsingIngredient(row.id, supabase);
+        await dataService.recalculateProductsUsingIngredient(row.id);
         if (onDataChange) onDataChange();
       } else if (table === 'produtos' && [
         'categoria_id', 'usar_margem_categoria', 'margem_percentual', 
         'margem_tipo', 'usar_preco_manual', 'preco_venda_manual', 
-        'rendimento_unidades', 'tempo_producao_unidade',
-        'custo_embalagem', 'taxa_venda_percentual', 'imposto_percentual'
+        'rendimento_unidades', 'tempo_producao',
+        'custo_embalagem', 'taxa_venda_percentual', 'imposto_percentual',
+        'custo_hora_trabalho', 'custo_fixo_rateado'
       ].includes(columnId)) {
         try {
-          const updatedProduct = await recalculateProduct(row.id, supabase);
+          await dataService.recalculateProduct(row.id);
+          const updatedProduct = await dataService.getProdutoById(row.id);
           if (updatedProduct) {
             setData(old => old.map(r => r.id === row.id ? updatedProduct : r));
           }
@@ -163,7 +144,7 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
         }
         if (onDataChange) onDataChange();
       } else if (table === 'categorias' && (columnId === 'margem_padrao' || columnId === 'tipo_margem')) {
-        await recalculateAllProducts(supabase);
+        await dataService.recalculateAllProducts();
         if (onDataChange) onDataChange();
       } else {
         if (onDataChange) onDataChange();
@@ -189,10 +170,11 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
       case 'produtos':
         return [
           'nome', 'descricao', 'categoria_id', 'rendimento_unidades', 
-          'tempo_producao_valor', 'tempo_producao_unidade', 
+          'tempo_producao', 'custo_hora_trabalho', 'custo_fixo_rateado',
           'usar_margem_categoria', 'margem_percentual', 'margem_tipo', 
           'usar_preco_manual', 'preco_venda_manual', 'user_id',
-          'custo_embalagem', 'taxa_venda_percentual', 'imposto_percentual'
+          'custo_embalagem', 'taxa_venda_percentual', 'imposto_percentual',
+          'custo_total', 'custo_unitario', 'custo_total_calculado'
         ];
       case 'categorias':
         return ['nome', 'margem_padrao', 'tipo_margem', 'user_id'];
@@ -222,7 +204,7 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
         rawNewRow = { ...rawNewRow, nome: 'Novo Ingrediente', unidade_embalagem: 'g', peso_embalagem: 1000, preco_embalagem: 0, preco_por_unidade_base: 0 };
         break;
       case 'produtos':
-        rawNewRow = { ...rawNewRow, nome: 'Novo Produto', rendimento_unidades: 1, usar_margem_categoria: true, margem_percentual: 30, margem_tipo: 'markup' };
+        rawNewRow = { ...rawNewRow, nome: 'Novo Produto', rendimento_unidades: 1, tempo_producao: 0, usar_margem_categoria: true, margem_percentual: 30, margem_tipo: 'markup' };
         break;
       case 'categorias':
         rawNewRow = { ...rawNewRow, nome: 'Nova Categoria', margem_padrao: 100, tipo_margem: 'markup' };
@@ -247,18 +229,9 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
       }, {});
 
     try {
-      const { data: result, error } = await supabase.from(table).insert([cleanNewRow]).select();
+      const result = await dataService.insertEntities(table, [cleanNewRow]);
       
-      if (error) {
-        console.error(`ERRO SUPABASE AO ADICIONAR EM ${table}:`, {
-          code: error.code,
-          message: error.message,
-          details: error.details,
-          hint: error.hint,
-          payload: cleanNewRow
-        });
-        toast.error(`Erro no Banco (${error.code}): ${error.message}`);
-      } else if (result && result.length > 0) {
+      if (result && result.length > 0) {
         setData(old => [result[0], ...old]);
         toast.success('Adicionado com sucesso');
         if (onDataChange) onDataChange();
@@ -271,29 +244,17 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
 
   const deleteRow = async (id: string) => {
     try {
-      const { error } = await supabase.from(table).delete().eq('id', id);
-      
-      if (error) {
-        console.error(`ERRO SUPABASE AO DELETAR EM ${table}:`, {
-          code: error.code,
-          message: error.message,
-          details: error.details
-        });
-        
-        if (error.code === '23503') {
-          toast.error('Não é possível excluir: este item está sendo usado em um produto ou ficha técnica.');
-          return;
-        }
-        toast.error(`Erro no Banco (${error.code}): ${error.message}`);
-        return;
-      }
-
+      await dataService.deleteEntity(table, id);
       setData(old => old.filter(row => row.id !== id));
       toast.success('Deletado');
       if (onDataChange) onDataChange();
     } catch (err: any) {
       console.error('Erro ao deletar:', err);
-      toast.error(`Erro inesperado: ${err.message}`);
+      if (err.code === '23503') {
+        toast.error('Não é possível excluir: este item está sendo usado em um produto ou ficha técnica.');
+      } else {
+        toast.error(`Erro no Banco (${err.code || '?'}): ${err.message}`);
+      }
     }
   };
 
@@ -303,7 +264,7 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
     setIsRecalculating(true);
     const loadingToast = toast.loading('Recalculando todos os produtos...');
     try {
-      await recalculateAllProducts(supabase);
+      await dataService.recalculateAllProducts();
       await fetchData();
       toast.success('Todos os produtos foram recalculados!', { id: loadingToast });
       if (onDataChange) onDataChange();
@@ -339,8 +300,8 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
     try {
       let categoryMap: Record<string, string> = {};
       if (table === 'produtos') {
-        const { data: cats } = await supabase.from('categorias').select('id, nome');
-        cats?.forEach(c => {
+        const cats = await dataService.getTableData('categorias');
+        cats?.forEach((c: any) => {
           categoryMap[c.nome.toLowerCase()] = c.id;
         });
       }
@@ -373,10 +334,10 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
               if (catId) {
                 value = catId;
               } else if (value && value.length > 1) {
-                const { data: newCat } = await supabase.from('categorias').insert([{ nome: value, user_id: user?.id }]).select();
-                if (newCat && newCat[0]) {
-                  categoryMap[value.toLowerCase()] = newCat[0].id;
-                  value = newCat[0].id;
+                const newCat = await dataService.saveEntity('categorias', { nome: value, user_id: user?.id });
+                if (newCat) {
+                  categoryMap[value.toLowerCase()] = newCat.id;
+                  value = newCat.id;
                 }
               } else {
                 value = null;
@@ -454,25 +415,20 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
         return;
       }
 
-      const { data: insertedData, error } = await supabase.from(table).insert(rowsToInsert).select();
+      const insertedData = await dataService.insertEntities(table, rowsToInsert);
       
-      if (error) {
-        console.error(`ERRO SUPABASE NA IMPORTAÇÃO EM ${table}:`, {
-          code: error.code,
-          message: error.message,
-          details: error.details
-        });
-        throw error;
-      }
+      if (insertedData && insertedData.length > 0) {
+        setData(prev => [...insertedData, ...prev]);
+        
+        if (table === 'ingredientes' || table === 'categorias') {
+          await dataService.recalculateAllProducts();
+        }
 
-      setData(prev => [...(insertedData || []), ...prev]);
-      
-      if (table === 'ingredientes' || table === 'categorias') {
-        await recalculateAllProducts(supabase);
+        toast.success(`${insertedData.length} registros importados!`, { id: loadingToast });
+        if (onDataChange) onDataChange();
+      } else {
+        toast.dismiss(loadingToast);
       }
-
-      toast.success(`${insertedData?.length || 0} registros importados!`, { id: loadingToast });
-      if (onDataChange) onDataChange();
     } catch (error: any) {
       console.error('Erro ao colar dados:', error);
       toast.error(`Erro na importação (${error.code || '?'}): ${error.message}`, { id: loadingToast });
@@ -578,12 +534,12 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse table-fixed min-w-[800px]">
+        <table className="w-full text-left border-collapse table-auto min-w-[1200px]">
           <thead>
             {tableInstance.getHeaderGroups().map(headerGroup => (
               <tr key={headerGroup.id} className="bg-surface-container-low/50">
                 {headerGroup.headers.map(header => (
-                  <th key={header.id} className="px-4 py-3 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest border-r border-b border-surface-container-high last:border-r-0">
+                  <th key={header.id} className="px-4 py-3 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest border-r border-b border-surface-container-high last:border-r-0 whitespace-nowrap">
                     {flexRender(header.column.columnDef.header, header.getContext())}
                   </th>
                 ))}
@@ -594,7 +550,7 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
             {tableInstance.getRowModel().rows.map(row => (
               <tr key={row.id} className={`hover:bg-surface-container-low/30 transition-colors group ${savingRows.has((row.original as any).id) ? 'opacity-60 bg-primary/5' : ''}`}>
                 {row.getVisibleCells().map(cell => (
-                  <td key={cell.id} className="px-2 py-1 text-sm border-r border-surface-container-high last:border-r-0 h-10 relative">
+                  <td key={cell.id} className="px-2 py-1 text-sm border-r border-surface-container-high last:border-r-0 h-10 relative whitespace-nowrap">
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     {savingRows.has((row.original as any).id) && cell.column.id === 'actions' && (
                       <div className="absolute inset-0 flex items-center justify-center bg-surface-container-lowest/50">
@@ -682,8 +638,12 @@ export const CategoryCell = ({ getValue, row: { index }, column: { id }, table }
   }, []);
 
   const fetchCategories = async () => {
-    const { data } = await supabase.from('categorias').select('*').order('nome');
-    setCategories(data || []);
+    try {
+      const data = await dataService.getTableData('categorias');
+      setCategories(data || []);
+    } catch (err) {
+      console.error('Erro ao buscar categorias:', err);
+    }
   };
 
   useEffect(() => {
@@ -703,18 +663,19 @@ export const CategoryCell = ({ getValue, row: { index }, column: { id }, table }
   const handleCreate = async () => {
     if (!newCategory.trim()) return;
     
-    const { data, error } = await supabase.from('categorias').insert([{ nome: newCategory, user_id: user?.id }]).select();
-    if (error) {
+    try {
+      const created = await dataService.saveEntity('categorias', { nome: newCategory, user_id: user?.id });
+      if (created) {
+        setCategories(prev => [...prev, created].sort((a, b) => a.nome.localeCompare(b.nome)));
+        setValue(created.id);
+        table.options.meta?.updateData(index, id, created.id);
+        setIsCreating(false);
+        setNewCategory('');
+        toast.success('Categoria criada');
+      }
+    } catch (error: any) {
       console.error('Erro ao criar categoria:', error);
       toast.error(`Erro ao criar categoria: ${error.message}`);
-    } else {
-      const created = data[0];
-      setCategories(prev => [...prev, created].sort((a, b) => a.nome.localeCompare(b.nome)));
-      setValue(created.id);
-      table.options.meta?.updateData(index, id, created.id);
-      setIsCreating(false);
-      setNewCategory('');
-      toast.success('Categoria criada');
     }
   };
 

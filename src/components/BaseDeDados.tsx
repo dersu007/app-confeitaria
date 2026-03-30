@@ -3,8 +3,8 @@ import { DatabaseGrid, EditableCell, SelectCell, CategoryCell } from './Database
 import { createColumnHelper } from '@tanstack/react-table';
 import { RefreshCw, BookOpen, ChevronRight } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { supabase } from '../lib/supabase';
-import { formatCurrency, calculateProductPricing, recalculateAllProducts } from '../services/bakeryService';
+import { dataService } from '../services/dataService';
+import { formatCurrency } from '../services/bakeryService';
 import { FichaTecnica } from './FichaTecnica';
 import { Precificacao } from './Precificacao';
 
@@ -20,7 +20,7 @@ export const BaseDeDados = () => {
   const recalculateAll = async () => {
     const loadingToast = toast.loading('Recalculando tudo...');
     try {
-      await recalculateAllProducts(supabase);
+      await dataService.recalculateAllProducts();
       refresh();
       toast.success('Recalculado com sucesso!', { id: loadingToast });
     } catch (error) {
@@ -57,23 +57,21 @@ export const BaseDeDados = () => {
   const productColumns = [
     columnHelper.accessor('nome', { header: 'Nome', cell: EditableCell }),
     columnHelper.accessor('categoria_id', { header: 'Categoria', cell: CategoryCell }),
-    columnHelper.accessor('tempo_producao_valor', { header: 'Tempo Prod. (Valor)', cell: EditableCell }),
-    columnHelper.accessor('tempo_producao_unidade', { 
-      header: 'Tempo Prod. (Unid.)', 
-      cell: (props) => (
-        <SelectCell 
-          {...props} 
-          options={[
-            { value: 'horas', label: 'Horas' },
-            { value: 'dias', label: 'Dias' },
-          ]} 
-        />
-      )
-    }),
+    columnHelper.accessor('tempo_producao', { header: 'Tempo Prod. (Horas)', cell: EditableCell }),
     columnHelper.accessor('rendimento_unidades', { header: 'Rendimento', cell: EditableCell }),
+    columnHelper.accessor('custo_hora_trabalho', { header: 'Custo Hora (R$)', cell: EditableCell }),
+    columnHelper.accessor('custo_fixo_rateado', { header: 'Custo Fixo (R$)', cell: EditableCell }),
     columnHelper.accessor('custo_total_calculado', { 
       header: 'Custo Ficha', 
       cell: info => <span className="font-mono text-xs">{formatCurrency(info.getValue() || 0)}</span> 
+    }),
+    columnHelper.accessor('custo_total', { 
+      header: 'Custo Total', 
+      cell: info => <span className="font-mono text-xs font-bold">{formatCurrency(info.getValue() || 0)}</span> 
+    }),
+    columnHelper.accessor('custo_unitario', { 
+      header: 'Custo Unit.', 
+      cell: info => <span className="font-mono text-xs font-bold text-primary">{formatCurrency(info.getValue() || 0)}</span> 
     }),
     columnHelper.accessor('custo_embalagem', { header: 'Custo Emb.', cell: EditableCell }),
     columnHelper.accessor('taxa_venda_percentual', { header: 'Taxas %', cell: EditableCell }),

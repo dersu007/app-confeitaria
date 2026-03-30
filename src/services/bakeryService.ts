@@ -106,141 +106,6 @@ export const calculateProductPricing = (
   };
 };
 
-export const recalculateProduct = async (productId: string, supabase: any) => {
-  try {
-    // 1. Buscar produto e sua categoria
-    const { data: product, error: pErr } = await supabase
-      .from('produtos')
-      .select('*, categoria:categorias!categoria_id(*)')
-      .eq('id', productId)
-      .maybeSingle();
-      
-    if (pErr || !product) {
-      console.error('Erro ao buscar produto para recálculo:', pErr);
-      return null;
-    }
-
-    // 2. Buscar produto_ingredientes (itens da receita)
-    const { data: recipeItems, error: rErr } = await supabase
-      .from('produto_ingredientes')
-      .select('*, ingrediente:ingredientes!ingrediente_id(*)')
-      .eq('produto_id', productId);
-      
-    if (rErr || !recipeItems) {
-      console.error('Erro ao buscar ingredientes do produto para recálculo:', rErr);
-      return null;
-    }
-
-    // 3. Calcular custo_calculado de cada ingrediente e somar custo_total_calculado
-    let totalCost = 0;
-    const updatedRecipeItems = [];
-
-    for (const item of recipeItems) {
-      if (item.ingrediente) {
-        const itemCost = calculateRecipeIngredientCost(
-          item.quantidade,
-          item.unidade,
-          item.ingrediente.preco_por_unidade_base
-        );
-        totalCost += itemCost;
-        
-        // Atualizar custo_calculado no banco se necessário
-        if (item.custo_calculado !== itemCost) {
-          updatedRecipeItems.push({ id: item.id, custo_calculado: itemCost });
-        }
-      }
-    }
-
-    if (isNaN(totalCost)) totalCost = 0;
-    totalCost = Math.round((totalCost + Number.EPSILON) * 100) / 100;
-
-    // 4. Calcular custos de mão de obra e fixos
-    // custo_mao_obra = tempo_producao × custo_hora_trabalho
-    const tempoProducao = Number(product.tempo_producao) || 0;
-    const custoHora = Number(product.custo_hora_trabalho) || 0;
-    const laborCost = tempoProducao * custoHora;
-    
-    // custo_fixo_rateado
-    const fixedCost = Number(product.custo_fixo_rateado) || 0;
-    
-    // Custo Total = Insumos + Mão de Obra + Custos Fixos
-    const fullTotalCost = totalCost + laborCost + fixedCost;
-
-    // Atualizar itens da receita no banco
-    if (updatedRecipeItems.length > 0) {
-      for (const item of updatedRecipeItems) {
-        await supabase.from('produto_ingredientes').update({ custo_calculado: item.custo_calculado }).eq('id', item.id);
-      }
-    }
-
-    // 5. Calcular custo_unitario (usando rendimento_unidades)
-    const unitCost = calculateUnitCost(fullTotalCost, product.rendimento_unidades);
-
-    // 6. Calcular preco_venda_final e margem_real_calculada
-    const activeMargin = resolveProductMargin(product, product.categoria);
-    
-    const { precoVendaFinal, margemRealCalculada } = calculateProductPricing(
-      unitCost,
-      activeMargin.margem,
-      activeMargin.tipo,
-      product.usar_preco_manual,
-      product.preco_venda_manual,
-      product.custo_embalagem || 0,
-      product.taxa_venda_percentual || 0,
-      product.imposto_percentual || 0
-    );
-
-    // 7. Atualizar produto com os novos valores calculados
-    const updateData = sanitizeProductUpdate({
-      custo_mao_obra: laborCost,
-      custo_fixo_rateado: fixedCost,
-      custo_total: fullTotalCost,
-      custo_unitario: unitCost,
-      preco_venda_final: precoVendaFinal,
-      margem_real_calculada: margemRealCalculada,
-      // Keep old names for compatibility if needed
-      custo_total_calculado: fullTotalCost,
-      custo_unitario_snapshot: unitCost
-    });
-
-    const { data: updatedProduct, error: uErr } = await supabase.from('produtos').update(updateData).eq('id', productId).select().single();
-
-    if (uErr) {
-      console.error('Erro ao atualizar produto após recálculo:', uErr);
-    }
-
-    return updatedProduct;
-  } catch (err) {
-    console.error('Erro inesperado no recálculo do produto:', err);
-    return null;
-  }
-};
-
-export const recalculateAllProducts = async (supabase: any) => {
-  const { data: products } = await supabase.from('produtos').select('id');
-  if (!products) return;
-
-  for (const p of products) {
-    await recalculateProduct(p.id, supabase);
-  }
-};
-
-export const recalculateProductsUsingIngredient = async (ingredientId: string, supabase: any) => {
-  const { data: recipeItems } = await supabase
-    .from('produto_ingredientes')
-    .select('produto_id')
-    .eq('ingrediente_id', ingredientId);
-    
-  if (!recipeItems) return;
-
-  // Unique product IDs
-  const productIds = Array.from(new Set(recipeItems.map((item: any) => item.produto_id)));
-  
-  for (const productId of productIds) {
-    await recalculateProduct(productId as string, supabase);
-  }
-};
-
 export const calculateUnitCost = (custoTotal: number | undefined | null, rendimento: number | undefined | null): number => {
   const c = Number(custoTotal) || 0;
   const r = Number(rendimento) || 1;
@@ -264,6 +129,8 @@ export const formatCurrency = (value: number) => {
 export const sanitizeProductUpdate = (productData: any) => {
   // Core fields that are expected to always exist
   const coreFields = [
+    'id',
+    'user_id',
     'nome',
     'categoria_id',
     'rendimento_unidades',

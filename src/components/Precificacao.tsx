@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
+import { dataService } from '../services/dataService';
 import { useAuth } from '../lib/auth';
 import { Produto, Categoria } from '../types';
 import { 
   formatCurrency, 
   calculateProductPricing, 
-  resolveProductMargin,
-  recalculateProduct
+  resolveProductMargin
 } from '../services/bakeryService';
 import { 
   Search, 
@@ -35,15 +34,12 @@ export const Precificacao = () => {
     setLoading(true);
     try {
       const [prodRes, catRes] = await Promise.all([
-        supabase.from('produtos').select('*').order('nome'),
-        supabase.from('categorias').select('*')
+        dataService.getProdutos(),
+        dataService.getCategorias()
       ]);
 
-      if (prodRes.error) throw prodRes.error;
-      if (catRes.error) throw catRes.error;
-
-      setProducts(prodRes.data || []);
-      setCategories(catRes.data || []);
+      setProducts(prodRes || []);
+      setCategories(catRes || []);
     } catch (error: any) {
       console.error('Erro ao carregar dados de precificação:', error);
       toast.error('Erro ao carregar produtos');
@@ -55,15 +51,10 @@ export const Precificacao = () => {
   const handleUpdate = async (id: string, field: string, value: any) => {
     setUpdatingId(id);
     try {
-      const { error } = await supabase
-        .from('produtos')
-        .update({ [field]: value })
-        .eq('id', id);
-
-      if (error) throw error;
+      await dataService.saveProduto({ id, [field]: value } as any);
 
       // Recalcular após atualização
-      const updatedProduct = await recalculateProduct(id, supabase);
+      const updatedProduct = await dataService.recalculateProduct(id);
       if (updatedProduct) {
         setProducts(prev => prev.map(p => p.id === id ? updatedProduct : p));
       }

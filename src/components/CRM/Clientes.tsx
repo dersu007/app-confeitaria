@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../../lib/supabase';
+import { dataService } from '../../services/dataService';
 import { Cliente, Pedido } from '../../types';
 import { 
   Users, 
@@ -35,17 +35,14 @@ export const Clientes = () => {
 
   const fetchClientes = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('clientes')
-      .select('*')
-      .order('nome');
-    
-    if (error) {
-      toast.error('Erro ao carregar clientes');
-    } else {
+    try {
+      const data = await dataService.getClientes();
       setClientes(data || []);
+    } catch (error) {
+      toast.error('Erro ao carregar clientes');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const filteredClientes = clientes.filter(c => {
@@ -330,6 +327,7 @@ const ClienteModal = ({ cliente, onClose, onSave }: { cliente: Cliente | null, o
     
     // Clean up data: convert empty strings to null for optional fields
     const submissionData = {
+      id: cliente?.id,
       nome: formData.nome,
       email: formData.email || null,
       telefone: formData.telefone || null,
@@ -337,16 +335,15 @@ const ClienteModal = ({ cliente, onClose, onSave }: { cliente: Cliente | null, o
       observacoes: formData.observacoes || null
     };
 
-    const { error } = cliente 
-      ? await supabase.from('clientes').update(submissionData).eq('id', cliente.id)
-      : await supabase.from('clientes').insert([submissionData]);
-
-    if (error) {
-      console.error('Erro detalhado do Supabase:', error);
+    try {
+      const result = await dataService.saveCliente(submissionData as any);
+      if (result) {
+        toast.success(cliente ? 'Cliente atualizado' : 'Cliente cadastrado');
+        onSave();
+      }
+    } catch (error: any) {
+      console.error('Erro ao salvar cliente:', error);
       toast.error(`Erro ao salvar: ${error.message}`);
-    } else {
-      toast.success(cliente ? 'Cliente atualizado' : 'Cliente cadastrado');
-      onSave();
     }
   };
 

@@ -21,6 +21,7 @@ export interface Ingrediente {
 
 export interface Produto {
   id: string;
+  user_id?: string;
   nome: string;
   categoria_id: string;
   rendimento_unidades: number;
@@ -44,11 +45,10 @@ export interface Produto {
   imagem_url?: string;
   modo_preparo?: string;
   ingredientes?: ProdutoIngrediente[];
+  categoria?: Categoria;
   // Keep old names for compatibility if needed, but user said "assume it has these fields"
   custo_total_calculado?: number;
   custo_unitario_snapshot?: number;
-  tempo_producao_valor?: number;
-  tempo_producao_unidade?: 'horas' | 'dias';
   rateio_despesas_fixas?: number;
 }
 

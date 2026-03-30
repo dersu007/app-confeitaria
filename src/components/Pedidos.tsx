@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
+import { dataService } from '../services/dataService';
 import { Pedido, Cliente } from '../types';
 import { 
   ShoppingBag, 
@@ -41,36 +41,24 @@ export const Pedidos = () => {
 
   const fetchPedidos = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('pedidos')
-      .select(`
-        *,
-        cliente:clientes(*),
-        itens:pedidos_itens(*, produto:produtos(*)),
-        extras:pedidos_extras(*)
-      `)
-      .order('created_at', { ascending: false });
-    
-    if (error) {
+    try {
+      const data = await dataService.getPedidos();
+      setPedidos(data);
+    } catch (error) {
       console.error('Erro ao carregar pedidos:', error);
       toast.error('Erro ao carregar pedidos');
-    } else {
-      setPedidos(data || []);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleStatusChange = async (pedidoId: string, newStatus: Pedido['status']) => {
-    const { error } = await supabase
-      .from('pedidos')
-      .update({ status: newStatus })
-      .eq('id', pedidoId);
-    
-    if (error) {
-      toast.error('Erro ao atualizar status');
-    } else {
+    try {
+      await dataService.updatePedidoStatus(pedidoId, newStatus);
       setPedidos(prev => prev.map(p => p.id === pedidoId ? { ...p, status: newStatus } : p));
       toast.success(`Pedido movido para ${newStatus}`);
+    } catch (error) {
+      toast.error('Erro ao atualizar status');
     }
   };
 
