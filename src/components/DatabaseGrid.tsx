@@ -179,56 +179,72 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
     }
   };
 
+  // Whitelist de colunas permitidas por tabela para evitar erro PGRST204
+  const getAllowedColumns = (tableName: string): string[] => {
+    switch (tableName) {
+      case 'ingredientes':
+        return ['nome', 'descricao', 'fornecedor', 'unidade_embalagem', 'peso_embalagem', 'preco_embalagem', 'preco_por_unidade_base', 'user_id'];
+      case 'produtos':
+        return [
+          'nome', 'descricao', 'categoria_id', 'rendimento_unidades', 
+          'tempo_producao_valor', 'tempo_producao_unidade', 
+          'usar_margem_categoria', 'margem_percentual', 'margem_tipo', 
+          'usar_preco_manual', 'preco_venda_manual', 'user_id'
+        ];
+      case 'categorias':
+        return ['nome', 'margem_padrao', 'tipo_margem', 'user_id'];
+      case 'despesas_fixas':
+        return ['descricao', 'valor_mensal', 'categoria', 'user_id'];
+      case 'clientes':
+        return [
+          'nome', 'telefone', 'email', 'cpf_cnpj', 'data_nascimento', 
+          'endereco', 'cidade', 'estado', 'cep', 'observacoes', 'segmento', 'user_id'
+        ];
+      default:
+        return ['user_id'];
+    }
+  };
+
   const addRow = async () => {
     if (!user?.id) {
       toast.error('Você precisa estar logado para adicionar itens');
       return;
     }
 
-    const newRow: any = {
-      nome: 'Novo Item',
-      descricao: '',
-      fornecedor: '',
-      unidade_embalagem: 'un',
-      peso_embalagem: 0,
-      preco_embalagem: 0,
-      preco_por_unidade_base: 0,
-      tempo_producao_valor: 0,
-      tempo_producao_unidade: 'horas',
-      rendimento_unidades: 1,
-      margem_percentual: 0,
-      margem_tipo: 'markup',
-      usar_margem_categoria: true,
-      usar_preco_manual: false,
-      preco_venda_manual: 0,
-      custo_total_calculado: 0,
-      preco_venda_final: 0,
-      margem_real_calculada: 0,
-      valor_mensal: 0,
-      segmento: '',
-      telefone: '',
-      email: '',
-      observacoes: '',
-      user_id: user.id // Blindagem: Incluindo user_id explicitamente
-    };
-    
-    if (table === 'despesas_fixas') {
-      newRow.descricao = 'Nova Despesa';
-    } else if (table === 'clientes') {
-      newRow.nome = 'Novo Cliente';
-      newRow.segmento = 'Novo';
-    } else if (table === 'ingredientes') {
-      newRow.unidade_embalagem = 'g';
-      newRow.peso_embalagem = 1000;
-    } else if (table === 'produtos') {
-      newRow.margem_percentual = 30;
-    } else if (table === 'categorias') {
-      newRow.margem_padrao = 100;
-      newRow.tipo_margem = 'markup';
+    let rawNewRow: any = { user_id: user.id };
+
+    // Valores padrão por tabela
+    switch (table) {
+      case 'ingredientes':
+        rawNewRow = { ...rawNewRow, nome: 'Novo Ingrediente', unidade_embalagem: 'g', peso_embalagem: 1000, preco_embalagem: 0, preco_por_unidade_base: 0 };
+        break;
+      case 'produtos':
+        rawNewRow = { ...rawNewRow, nome: 'Novo Produto', rendimento_unidades: 1, usar_margem_categoria: true, margem_percentual: 30, margem_tipo: 'markup' };
+        break;
+      case 'categorias':
+        rawNewRow = { ...rawNewRow, nome: 'Nova Categoria', margem_padrao: 100, tipo_margem: 'markup' };
+        break;
+      case 'despesas_fixas':
+        rawNewRow = { ...rawNewRow, descricao: 'Nova Despesa', valor_mensal: 0, categoria: 'Geral' };
+        break;
+      case 'clientes':
+        rawNewRow = { ...rawNewRow, nome: 'Novo Cliente', segmento: 'Novo' };
+        break;
+      default:
+        rawNewRow = { ...rawNewRow, nome: 'Novo Item' };
     }
 
+    // Limpeza final: Apenas colunas permitidas
+    const allowed = getAllowedColumns(table);
+    const cleanNewRow = Object.keys(rawNewRow)
+      .filter(key => allowed.includes(key))
+      .reduce((obj: any, key) => {
+        obj[key] = rawNewRow[key];
+        return obj;
+      }, {});
+
     try {
-      const { data: result, error } = await supabase.from(table).insert([newRow]).select();
+      const { data: result, error } = await supabase.from(table).insert([cleanNewRow]).select();
       
       if (error) {
         console.error(`ERRO SUPABASE AO ADICIONAR EM ${table}:`, {
@@ -236,7 +252,7 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
           message: error.message,
           details: error.details,
           hint: error.hint,
-          payload: newRow
+          payload: cleanNewRow
         });
         toast.error(`Erro no Banco (${error.code}): ${error.message}`);
       } else if (result && result.length > 0) {
@@ -332,13 +348,14 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
         col.accessorKey !== 'margem_real_calculada'
       );
       
+      const allowed = getAllowedColumns(table);
       const rowsToInsert = [];
       
       for (const rowText of rows) {
         const cells = rowText.split('\t');
         if (cells.length < 1 && cells[0].trim() === '') continue;
 
-        const rowData: any = { user_id: user?.id };
+        const rawRowData: any = { user_id: user?.id };
         
         for (let index = 0; index < editableColumns.length; index++) {
           const col = editableColumns[index];
@@ -389,34 +406,42 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
               }
             }
             
-            rowData[key] = value;
+            rawRowData[key] = value;
           }
         }
 
         if (table === 'ingredientes') {
-          rowData.unidade_embalagem = rowData.unidade_embalagem || 'g';
-          rowData.peso_embalagem = rowData.peso_embalagem || 1000;
-          rowData.preco_embalagem = rowData.preco_embalagem || 0;
-          rowData.preco_por_unidade_base = calculateIngredientUnitPrice(
-            rowData.preco_embalagem || 0,
-            rowData.peso_embalagem || 1000,
-            rowData.unidade_embalagem || 'g'
+          rawRowData.unidade_embalagem = rawRowData.unidade_embalagem || 'g';
+          rawRowData.peso_embalagem = rawRowData.peso_embalagem || 1000;
+          rawRowData.preco_embalagem = rawRowData.preco_embalagem || 0;
+          rawRowData.preco_por_unidade_base = calculateIngredientUnitPrice(
+            rawRowData.preco_embalagem || 0,
+            rawRowData.peso_embalagem || 1000,
+            rawRowData.unidade_embalagem || 'g'
           );
         }
         
         if (table === 'produtos') {
-          rowData.usar_margem_categoria = rowData.usar_margem_categoria ?? true;
-          rowData.margem_percentual = rowData.margem_percentual || 30;
-          rowData.margem_tipo = rowData.margem_tipo || 'markup';
-          rowData.rendimento_unidades = rowData.rendimento_unidades || 1;
+          rawRowData.usar_margem_categoria = rawRowData.usar_margem_categoria ?? true;
+          rawRowData.margem_percentual = rawRowData.margem_percentual || 30;
+          rawRowData.margem_tipo = rawRowData.margem_tipo || 'markup';
+          rawRowData.rendimento_unidades = rawRowData.rendimento_unidades || 1;
         }
 
         if (table === 'categorias') {
-          rowData.margem_padrao = rowData.margem_padrao || 100;
-          rowData.tipo_margem = rowData.tipo_margem || 'markup';
+          rawRowData.margem_padrao = rawRowData.margem_padrao || 100;
+          rawRowData.tipo_margem = rawRowData.tipo_margem || 'markup';
         }
 
-        rowsToInsert.push(rowData);
+        // Limpeza final do objeto de importação
+        const cleanRowData = Object.keys(rawRowData)
+          .filter(key => allowed.includes(key))
+          .reduce((obj: any, key) => {
+            obj[key] = rawRowData[key];
+            return obj;
+          }, {});
+
+        rowsToInsert.push(cleanRowData);
       }
 
       if (rowsToInsert.length === 0) {
