@@ -11,7 +11,7 @@ import { Precificacao } from './Precificacao';
 const columnHelper = createColumnHelper<any>();
 
 export const BaseDeDados = () => {
-  const [activeTab, setActiveTab] = useState<'ingredientes' | 'produtos' | 'categorias' | 'despesas' | 'clientes' | 'precificacao'>('ingredientes');
+  const [activeTab, setActiveTab] = useState<'ingredientes' | 'produtos' | 'categorias' | 'despesas' | 'clientes'>('ingredientes');
   const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -59,72 +59,6 @@ export const BaseDeDados = () => {
     columnHelper.accessor('categoria_id', { header: 'Categoria', cell: CategoryCell }),
     columnHelper.accessor('tempo_producao', { header: 'Tempo Prod. (Horas)', cell: EditableCell }),
     columnHelper.accessor('rendimento_unidades', { header: 'Rendimento', cell: EditableCell }),
-    columnHelper.accessor('custo_hora_trabalho', { header: 'Custo Hora (R$)', cell: EditableCell }),
-    columnHelper.accessor('custo_fixo_rateado', { header: 'Custo Fixo (R$)', cell: EditableCell }),
-    columnHelper.accessor('custo_total_calculado', { 
-      header: 'Custo Ficha', 
-      cell: info => <span className="font-mono text-xs">{formatCurrency(info.getValue() || 0)}</span> 
-    }),
-    columnHelper.accessor('custo_total', { 
-      header: 'Custo Total', 
-      cell: info => <span className="font-mono text-xs font-bold">{formatCurrency(info.getValue() || 0)}</span> 
-    }),
-    columnHelper.accessor('custo_unitario', { 
-      header: 'Custo Unit.', 
-      cell: info => <span className="font-mono text-xs font-bold text-primary">{formatCurrency(info.getValue() || 0)}</span> 
-    }),
-    columnHelper.accessor('custo_embalagem', { header: 'Custo Emb.', cell: EditableCell }),
-    columnHelper.accessor('taxa_venda_percentual', { header: 'Taxas %', cell: EditableCell }),
-    columnHelper.accessor('imposto_percentual', { header: 'Imposto %', cell: EditableCell }),
-    columnHelper.accessor('usar_margem_categoria', { 
-      header: 'Usar Margem Cat.', 
-      cell: (props) => (
-        <SelectCell 
-          {...props} 
-          options={[
-            { value: true, label: 'Sim' },
-            { value: false, label: 'Não' },
-          ]} 
-        />
-      )
-    }),
-    columnHelper.accessor('margem_percentual', { header: 'Margem Prod. %', cell: EditableCell }),
-    columnHelper.accessor('margem_tipo', { 
-      header: 'Tipo Margem Prod.', 
-      cell: (props) => (
-        <SelectCell 
-          {...props} 
-          options={[
-            { value: 'markup', label: 'Markup' },
-            { value: 'margem_real', label: 'Margem Real' },
-          ]} 
-        />
-      )
-    }),
-    columnHelper.accessor('usar_preco_manual', { 
-      header: 'Preço Manual', 
-      cell: (props) => (
-        <SelectCell 
-          {...props} 
-          options={[
-            { value: false, label: 'Não' },
-            { value: true, label: 'Sim' },
-          ]} 
-        />
-      )
-    }),
-    columnHelper.accessor('preco_venda_manual', { header: 'Preço Manual (R$)', cell: EditableCell }),
-    columnHelper.accessor('preco_venda_final', { 
-      header: 'Preço Final', 
-      cell: info => <span className="font-bold text-primary">{formatCurrency(info.getValue() || 0)}</span> 
-    }),
-    columnHelper.accessor('margem_real_calculada', { 
-      header: 'Margem Real %', 
-      cell: info => {
-        const val = info.getValue() || 0;
-        return <span className={`font-bold ${val >= 40 ? 'text-primary' : 'text-error'}`}>{val.toFixed(1)}%</span>;
-      }
-    }),
     columnHelper.accessor('id', {
       header: 'Ficha Técnica',
       cell: ({ row }) => (
@@ -222,12 +156,6 @@ export const BaseDeDados = () => {
           >
             Clientes
           </button>
-          <button 
-            onClick={() => setActiveTab('precificacao')}
-            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'precificacao' ? 'bg-white shadow-sm text-primary' : 'text-on-surface-variant hover:text-primary'}`}
-          >
-            Precificação
-          </button>
         </div>
 
       </div>
@@ -238,7 +166,6 @@ export const BaseDeDados = () => {
         {activeTab === 'categorias' && <DatabaseGrid table="categorias" title="Categorias de Produtos" columns={categoryColumns} onDataChange={recalculateAll} refreshKey={refreshKey} />}
         {activeTab === 'despesas' && <DatabaseGrid table="despesas_fixas" title="Despesas Fixas Mensais" columns={expenseColumns} onDataChange={recalculateAll} refreshKey={refreshKey} />}
         {activeTab === 'clientes' && <DatabaseGrid table="clientes" title="Base de Clientes" columns={clientColumns} onDataChange={recalculateAll} refreshKey={refreshKey} />}
-        {activeTab === 'precificacao' && <Precificacao />}
       </div>
 
       {selectedProduct && (

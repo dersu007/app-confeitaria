@@ -6,6 +6,7 @@ import { BaseDeDados } from './components/BaseDeDados';
 import { Clientes } from './components/CRM/Clientes';
 import { Pedidos } from './components/Pedidos';
 import { Produtos } from './components/Produtos';
+import { Precificacao } from './components/Precificacao';
 import { Toaster } from 'react-hot-toast';
 import { Login } from './components/Login';
 import { Register } from './components/Register';
@@ -33,6 +34,7 @@ export default function App() {
             <Route path="clientes" element={<Clientes />} />
             <Route path="pedidos" element={<Pedidos />} />
             <Route path="produtos" element={<Produtos />} />
+            <Route path="precificacao" element={<Precificacao />} />
             <Route path="*" element={
               <div className="flex flex-col items-center justify-center h-[60vh] text-on-surface-variant">
                 <h2 className="text-2xl font-bold mb-2">Página em Construção</h2>

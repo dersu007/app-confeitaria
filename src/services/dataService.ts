@@ -98,7 +98,7 @@ class DataService {
         custo_unitario: unitCost,
         preco_venda_final: precoVendaFinal,
         margem_real_calculada: margemRealCalculada,
-        custo_total_calculado: fullTotalCost,
+        custo_total_calculado: totalCost,
         custo_unitario_snapshot: unitCost
       });
 

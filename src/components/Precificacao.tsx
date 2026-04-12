@@ -66,15 +66,27 @@ export const Precificacao = () => {
     }
   };
 
+  const recalculateAll = async () => {
+    const loadingToast = toast.loading('Recalculando todos os produtos...');
+    try {
+      await dataService.recalculateAllProducts();
+      await fetchData();
+      toast.success('Todos os produtos foram recalculados!', { id: loadingToast });
+    } catch (err: any) {
+      console.error('Erro no recálculo global:', err);
+      toast.error(`Erro no recálculo: ${err.message}`, { id: loadingToast });
+    }
+  };
+
   const getMarginColor = (margin: number) => {
-    if (margin >= 35) return 'text-success bg-success/10 border-success/20';
-    if (margin >= 15) return 'text-warning bg-warning/10 border-warning/20';
+    if (margin >= 40) return 'text-primary bg-primary/10 border-primary/20';
+    if (margin >= 20) return 'text-warning bg-warning/10 border-warning/20';
     return 'text-error bg-error/10 border-error/20';
   };
 
   const getMarginIcon = (margin: number) => {
-    if (margin >= 35) return <CheckCircle2 size={14} />;
-    if (margin >= 15) return <Info size={14} />;
+    if (margin >= 40) return <CheckCircle2 size={14} />;
+    if (margin >= 20) return <Info size={14} />;
     return <AlertTriangle size={14} />;
   };
 
@@ -87,31 +99,39 @@ export const Precificacao = () => {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 className="text-2xl font-bold headline text-primary flex items-center gap-2">
-            <TrendingUp size={24} /> Dashboard de Precificação
+            <DollarSign size={24} /> Precificação Profissional
           </h2>
-          <p className="text-sm text-on-surface-variant">Analise a saúde financeira e margens de lucro dos seus produtos</p>
+          <p className="text-sm text-on-surface-variant">Gerencie margens e preços finais de venda</p>
         </div>
-        <div className="relative w-full md:w-64">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" size={16} />
-          <input 
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-            placeholder="Buscar produto..."
-            className="pl-10 pr-4 py-2 bg-white border border-surface-container-high rounded-xl text-sm w-full focus:ring-2 focus:ring-primary/20 transition-all"
-          />
+        <div className="flex items-center gap-3 w-full md:w-auto">
+          <div className="relative w-full md:w-64">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" size={16} />
+            <input 
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              placeholder="Buscar produto..."
+              className="pl-10 pr-4 py-2 bg-white border border-surface-container-high rounded-xl text-sm w-full focus:ring-2 focus:ring-primary/20 transition-all"
+            />
+          </div>
+          <button 
+            onClick={recalculateAll}
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-white font-bold rounded-xl text-sm hover:opacity-90 transition-all whitespace-nowrap"
+          >
+            <RefreshCw size={16} /> Recalcular Tudo
+          </button>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white p-4 rounded-2xl border border-surface-container-high shadow-sm">
           <div className="flex items-center gap-3 mb-2">
-            <div className="p-2 bg-success/10 rounded-lg text-success">
+            <div className="p-2 bg-primary/10 rounded-lg text-primary">
               <CheckCircle2 size={20} />
             </div>
             <span className="text-sm font-bold text-on-surface-variant uppercase tracking-wider">Saudável</span>
           </div>
-          <p className="text-2xl font-bold text-on-surface">{products.filter(p => p.margem_real_calculada >= 35).length}</p>
-          <p className="text-xs text-on-surface-variant mt-1">Produtos com margem {'>'} 35%</p>
+          <p className="text-2xl font-bold text-on-surface">{products.filter(p => p.margem_real_calculada >= 40).length}</p>
+          <p className="text-xs text-on-surface-variant mt-1">Produtos com margem {'>'} 40%</p>
         </div>
         <div className="bg-white p-4 rounded-2xl border border-surface-container-high shadow-sm">
           <div className="flex items-center gap-3 mb-2">
@@ -120,8 +140,8 @@ export const Precificacao = () => {
             </div>
             <span className="text-sm font-bold text-on-surface-variant uppercase tracking-wider">Atenção</span>
           </div>
-          <p className="text-2xl font-bold text-on-surface">{products.filter(p => p.margem_real_calculada >= 15 && p.margem_real_calculada < 35).length}</p>
-          <p className="text-xs text-on-surface-variant mt-1">Produtos com margem entre 15% e 35%</p>
+          <p className="text-2xl font-bold text-on-surface">{products.filter(p => p.margem_real_calculada >= 20 && p.margem_real_calculada < 40).length}</p>
+          <p className="text-xs text-on-surface-variant mt-1">Produtos com margem entre 20% e 40%</p>
         </div>
         <div className="bg-white p-4 rounded-2xl border border-surface-container-high shadow-sm">
           <div className="flex items-center gap-3 mb-2">
@@ -130,8 +150,8 @@ export const Precificacao = () => {
             </div>
             <span className="text-sm font-bold text-on-surface-variant uppercase tracking-wider">Perigo</span>
           </div>
-          <p className="text-2xl font-bold text-on-surface">{products.filter(p => p.margem_real_calculada < 15).length}</p>
-          <p className="text-xs text-on-surface-variant mt-1">Produtos com margem {'<'} 15%</p>
+          <p className="text-2xl font-bold text-on-surface">{products.filter(p => p.margem_real_calculada < 20).length}</p>
+          <p className="text-xs text-on-surface-variant mt-1">Produtos com margem {'<'} 20%</p>
         </div>
       </div>
 
@@ -141,25 +161,27 @@ export const Precificacao = () => {
             <thead>
               <tr className="bg-surface-container-lowest">
                 <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant border-b border-surface-container-high">Produto</th>
-                <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant border-b border-surface-container-high">Custo Ficha</th>
-                <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant border-b border-surface-container-high">Custo Emb.</th>
-                <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant border-b border-surface-container-high">Taxas/Imp %</th>
-                <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant border-b border-surface-container-high">Preço Sugerido</th>
-                <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant border-b border-surface-container-high">Preço Final</th>
-                <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant border-b border-surface-container-high">Margem Real</th>
+                <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant border-b border-surface-container-high text-center">Custo Total</th>
+                <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant border-b border-surface-container-high text-center">Rendimento</th>
+                <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant border-b border-surface-container-high text-center">Custo Hora/Fixo</th>
+                <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant border-b border-surface-container-high text-center">Custo Unitário</th>
+                <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant border-b border-surface-container-high text-center">Taxas/Imp/Emb</th>
+                <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant border-b border-surface-container-high text-center">Preço Sugerido</th>
+                <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant border-b border-surface-container-high text-center">Preço Final</th>
+                <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant border-b border-surface-container-high text-center">Margem Real %</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-surface-container-high">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-on-surface-variant">
+                  <td colSpan={8} className="px-6 py-12 text-center text-on-surface-variant">
                     <RefreshCw size={24} className="animate-spin mx-auto mb-2 opacity-20" />
                     Carregando precificação...
                   </td>
                 </tr>
               ) : filteredProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-on-surface-variant">
+                  <td colSpan={8} className="px-6 py-12 text-center text-on-surface-variant">
                     Nenhum produto encontrado.
                   </td>
                 </tr>
@@ -188,49 +210,86 @@ export const Precificacao = () => {
                           {category?.nome || 'Sem Categoria'}
                         </div>
                       </td>
-                      <td className="px-6 py-4 font-mono text-sm">
-                        {formatCurrency(product.custo_unitario_snapshot || 0)}
+                      <td className="px-6 py-4 font-mono text-sm text-center">
+                        {formatCurrency(product.custo_total || 0)}
                       </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-on-surface-variant">R$</span>
+                      <td className="px-6 py-4 text-center">
+                        <div className="flex items-center justify-center gap-2">
                           <input 
                             type="number"
-                            step="0.01"
-                            value={product.custo_embalagem || 0}
-                            onChange={e => handleUpdate(product.id, 'custo_embalagem', parseFloat(e.target.value) || 0)}
-                            className="w-20 bg-surface-container-low border-none rounded-lg text-sm p-1 focus:ring-2 focus:ring-primary/20"
+                            step="1"
+                            value={product.rendimento_unidades || 1}
+                            onChange={e => handleUpdate(product.id, 'rendimento_unidades', parseInt(e.target.value) || 1)}
+                            className="w-16 bg-surface-container-low border-none rounded-lg text-sm p-1 text-center focus:ring-2 focus:ring-primary/20"
                           />
+                          <span className="text-[10px] text-on-surface-variant uppercase">un</span>
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        <div className="flex flex-col gap-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] text-on-surface-variant w-8">Taxa:</span>
+                        <div className="flex flex-col gap-1 items-center">
+                          <div className="flex items-center gap-1">
+                            <span className="text-[9px] text-on-surface-variant w-8">Hora:</span>
+                            <input 
+                              type="number"
+                              step="0.01"
+                              value={product.custo_hora_trabalho || 0}
+                              onChange={e => handleUpdate(product.id, 'custo_hora_trabalho', parseFloat(e.target.value) || 0)}
+                              className="w-14 bg-surface-container-low border-none rounded-lg text-[10px] p-0.5 text-center focus:ring-1 focus:ring-primary/20"
+                            />
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <span className="text-[9px] text-on-surface-variant w-8">Fixo:</span>
+                            <input 
+                              type="number"
+                              step="0.01"
+                              value={product.custo_fixo_rateado || 0}
+                              onChange={e => handleUpdate(product.id, 'custo_fixo_rateado', parseFloat(e.target.value) || 0)}
+                              className="w-14 bg-surface-container-low border-none rounded-lg text-[10px] p-0.5 text-center focus:ring-1 focus:ring-primary/20"
+                            />
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 font-mono text-sm text-center font-bold text-primary">
+                        {formatCurrency(product.custo_unitario || 0)}
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex flex-col gap-1 items-center">
+                          <div className="flex items-center gap-1">
+                            <span className="text-[9px] text-on-surface-variant w-8">Emb:</span>
+                            <input 
+                              type="number"
+                              step="0.01"
+                              value={product.custo_embalagem || 0}
+                              onChange={e => handleUpdate(product.id, 'custo_embalagem', parseFloat(e.target.value) || 0)}
+                              className="w-14 bg-surface-container-low border-none rounded-lg text-[10px] p-0.5 text-center focus:ring-1 focus:ring-primary/20"
+                            />
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <span className="text-[9px] text-on-surface-variant w-8">Taxa:</span>
                             <input 
                               type="number"
                               step="0.1"
                               value={product.taxa_venda_percentual || 0}
                               onChange={e => handleUpdate(product.id, 'taxa_venda_percentual', parseFloat(e.target.value) || 0)}
-                              className="w-16 bg-surface-container-low border-none rounded-lg text-xs p-1 focus:ring-2 focus:ring-primary/20"
+                              className="w-14 bg-surface-container-low border-none rounded-lg text-[10px] p-0.5 text-center focus:ring-1 focus:ring-primary/20"
                             />
-                            <span className="text-[10px] text-on-surface-variant">%</span>
+                            <span className="text-[9px] text-on-surface-variant">%</span>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] text-on-surface-variant w-8">Imp:</span>
+                          <div className="flex items-center gap-1">
+                            <span className="text-[9px] text-on-surface-variant w-8">Imp:</span>
                             <input 
                               type="number"
                               step="0.1"
                               value={product.imposto_percentual || 0}
                               onChange={e => handleUpdate(product.id, 'imposto_percentual', parseFloat(e.target.value) || 0)}
-                              className="w-16 bg-surface-container-low border-none rounded-lg text-xs p-1 focus:ring-2 focus:ring-primary/20"
+                              className="w-14 bg-surface-container-low border-none rounded-lg text-[10px] p-0.5 text-center focus:ring-1 focus:ring-primary/20"
                             />
-                            <span className="text-[10px] text-on-surface-variant">%</span>
+                            <span className="text-[9px] text-on-surface-variant">%</span>
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4">
-                        <div className="font-mono text-sm text-primary font-bold">
+                      <td className="px-6 py-4 text-center">
+                        <div className="font-mono text-sm text-on-surface-variant">
                           {formatCurrency(precoSugerido)}
                         </div>
                         <div className="text-[9px] text-on-surface-variant uppercase">
@@ -238,7 +297,7 @@ export const Precificacao = () => {
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        <div className="flex flex-col gap-2">
+                        <div className="flex flex-col items-center gap-2">
                           <div className="flex items-center gap-2">
                             <input 
                               type="checkbox"
@@ -256,12 +315,12 @@ export const Precificacao = () => {
                               disabled={!product.usar_preco_manual}
                               value={product.usar_preco_manual ? product.preco_venda_manual : product.preco_venda_final}
                               onChange={e => handleUpdate(product.id, 'preco_venda_manual', parseFloat(e.target.value) || 0)}
-                              className={`w-24 border-none rounded-lg text-sm p-1 focus:ring-2 focus:ring-primary/20 ${product.usar_preco_manual ? 'bg-surface-container-low font-bold' : 'bg-transparent text-on-surface-variant'}`}
+                              className={`w-24 border-none rounded-lg text-sm p-1 text-center focus:ring-2 focus:ring-primary/20 ${product.usar_preco_manual ? 'bg-surface-container-low font-bold text-primary' : 'bg-transparent text-on-surface-variant'}`}
                             />
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-6 py-4 text-center">
                         <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-bold ${getMarginColor(product.margem_real_calculada)}`}>
                           {getMarginIcon(product.margem_real_calculada)}
                           {product.margem_real_calculada.toFixed(1)}%

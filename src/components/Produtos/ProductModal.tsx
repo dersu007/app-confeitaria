@@ -125,7 +125,7 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
         preco_venda_final: precoVendaFinal,
         margem_real_calculada: margemRealCalculada,
         // Backwards compatibility
-        custo_total_calculado: fullTotalCost,
+        custo_total_calculado: custoInsumos,
         custo_unitario_snapshot: currentUnitCost
       };
 

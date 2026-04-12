@@ -62,9 +62,9 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
     fetchData();
   }, [table, refreshKey]);
 
-  const updateRow = async (rowIndex: number, columnId: string, value: any) => {
-    const row = data[rowIndex];
-    const originalData = [...data];
+  const updateRow = async (rowId: string, columnId: string, value: any) => {
+    const row = data.find(r => r.id === rowId);
+    if (!row) return;
     let finalValue = value;
 
     // Type conversion for numeric fields
@@ -110,11 +110,11 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
     }
 
     // Optimistic Update
-    setData(old => old.map((r, index) => index === rowIndex ? updatedRow : r));
-    setSavingRows(prev => new Set(prev).add(row.id));
+    setData(old => old.map(r => r.id === rowId ? updatedRow : r));
+    setSavingRows(prev => new Set(prev).add(rowId));
 
     try {
-      const updatePayload: any = { id: row.id, [columnId]: finalValue };
+      const updatePayload: any = { id: rowId, [columnId]: finalValue };
       
       if (table === 'ingredientes' && updatedRow.preco_por_unidade_base !== undefined) {
         updatePayload.preco_por_unidade_base = updatedRow.preco_por_unidade_base;
@@ -124,7 +124,7 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
       
       // Trigger recalculations
       if (table === 'ingredientes' && (columnId === 'preco_embalagem' || columnId === 'peso_embalagem' || columnId === 'unidade_embalagem')) {
-        await dataService.recalculateProductsUsingIngredient(row.id);
+        await dataService.recalculateProductsUsingIngredient(rowId);
         if (onDataChange) onDataChange();
       } else if (table === 'produtos' && [
         'categoria_id', 'usar_margem_categoria', 'margem_percentual', 
@@ -134,13 +134,13 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
         'custo_hora_trabalho', 'custo_fixo_rateado'
       ].includes(columnId)) {
         try {
-          await dataService.recalculateProduct(row.id);
-          const updatedProduct = await dataService.getProdutoById(row.id);
+          await dataService.recalculateProduct(rowId);
+          const updatedProduct = await dataService.getProdutoById(rowId);
           if (updatedProduct) {
-            setData(old => old.map(r => r.id === row.id ? updatedProduct : r));
+            setData(old => old.map(r => r.id === rowId ? updatedProduct : r));
           }
         } catch (err) {
-          console.error(`Erro ao recalcular produto ${row.id}:`, err);
+          console.error(`Erro ao recalcular produto ${rowId}:`, err);
         }
         if (onDataChange) onDataChange();
       } else if (table === 'categorias' && (columnId === 'margem_padrao' || columnId === 'tipo_margem')) {
@@ -152,11 +152,12 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
     } catch (error: any) {
       console.error(`Erro ao atualizar tabela ${table}, campo ${columnId}:`, error);
       toast.error(`Erro no Banco (${error.code || '?' }): ${error.message}`);
-      setData(originalData);
+      // Revert optimistic update
+      setData(old => old.map(r => r.id === rowId ? row : r));
     } finally {
       setSavingRows(prev => {
         const next = new Set(prev);
-        next.delete(row.id);
+        next.delete(rowId);
         return next;
       });
     }
@@ -174,7 +175,8 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
           'usar_margem_categoria', 'margem_percentual', 'margem_tipo', 
           'usar_preco_manual', 'preco_venda_manual', 'user_id',
           'custo_embalagem', 'taxa_venda_percentual', 'imposto_percentual',
-          'custo_total', 'custo_unitario', 'custo_total_calculado'
+          'custo_total', 'custo_unitario', 'custo_total_calculado',
+          'imagem_url', 'modo_preparo'
         ];
       case 'categorias':
         return ['nome', 'margem_padrao', 'tipo_margem', 'user_id'];
@@ -459,8 +461,8 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     meta: {
-      updateData: (rowIndex: number, columnId: string, value: any) => {
-        updateRow(rowIndex, columnId, value);
+      updateData: (rowId: string, columnId: string, value: any) => {
+        updateRow(rowId, columnId, value);
       },
     },
   });
@@ -534,12 +536,12 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse table-auto min-w-[1200px]">
+        <table className="w-full text-left border-collapse table-auto min-w-[1800px]">
           <thead>
             {tableInstance.getHeaderGroups().map(headerGroup => (
               <tr key={headerGroup.id} className="bg-surface-container-low/50">
                 {headerGroup.headers.map(header => (
-                  <th key={header.id} className="px-4 py-3 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest border-r border-b border-surface-container-high last:border-r-0 whitespace-nowrap">
+                  <th key={header.id} className="px-4 py-3 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest border-r border-b border-surface-container-high last:border-r-0 whitespace-nowrap min-w-[120px]">
                     {flexRender(header.column.columnDef.header, header.getContext())}
                   </th>
                 ))}
@@ -550,7 +552,7 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
             {tableInstance.getRowModel().rows.map(row => (
               <tr key={row.id} className={`hover:bg-surface-container-low/30 transition-colors group ${savingRows.has((row.original as any).id) ? 'opacity-60 bg-primary/5' : ''}`}>
                 {row.getVisibleCells().map(cell => (
-                  <td key={cell.id} className="px-2 py-1 text-sm border-r border-surface-container-high last:border-r-0 h-10 relative whitespace-nowrap">
+                  <td key={cell.id} className="px-4 py-2 text-sm border-r border-surface-container-high last:border-r-0 h-12 relative whitespace-nowrap overflow-hidden text-ellipsis max-w-[300px]">
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     {savingRows.has((row.original as any).id) && cell.column.id === 'actions' && (
                       <div className="absolute inset-0 flex items-center justify-center bg-surface-container-lowest/50">
@@ -572,7 +574,7 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
 };
 
 // Editable Cell Component
-export const EditableCell = ({ getValue, row: { index }, column: { id }, table }: any) => {
+export const EditableCell = ({ getValue, row, column: { id }, table }: any) => {
   const initialValue = getValue();
   const [value, setValue] = useState(initialValue);
 
@@ -582,7 +584,7 @@ export const EditableCell = ({ getValue, row: { index }, column: { id }, table }
 
   const onBlur = () => {
     if (value !== initialValue) {
-      table.options.meta?.updateData(index, id, value);
+      table.options.meta?.updateData(row.original.id, id, value);
     }
   };
 
@@ -597,7 +599,7 @@ export const EditableCell = ({ getValue, row: { index }, column: { id }, table }
 };
 
 // Select Cell Component
-export const SelectCell = ({ getValue, row: { index }, column: { id }, table, options }: any) => {
+export const SelectCell = ({ getValue, row, column: { id }, table, options }: any) => {
   const initialValue = getValue();
   const [value, setValue] = useState(initialValue);
 
@@ -608,7 +610,7 @@ export const SelectCell = ({ getValue, row: { index }, column: { id }, table, op
   const onChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newValue = e.target.value;
     setValue(newValue);
-    table.options.meta?.updateData(index, id, newValue);
+    table.options.meta?.updateData(row.original.id, id, newValue);
   };
 
   return (
@@ -625,7 +627,7 @@ export const SelectCell = ({ getValue, row: { index }, column: { id }, table, op
 };
 
 // Category Cell Component (with inline creation)
-export const CategoryCell = ({ getValue, row: { index }, column: { id }, table }: any) => {
+export const CategoryCell = ({ getValue, row, column: { id }, table }: any) => {
   const { user } = useAuth();
   const initialValue = getValue();
   const [value, setValue] = useState(initialValue);
@@ -656,7 +658,7 @@ export const CategoryCell = ({ getValue, row: { index }, column: { id }, table }
       setIsCreating(true);
     } else {
       setValue(val);
-      table.options.meta?.updateData(index, id, val);
+      table.options.meta?.updateData(row.original.id, id, val);
     }
   };
 
@@ -668,7 +670,7 @@ export const CategoryCell = ({ getValue, row: { index }, column: { id }, table }
       if (created) {
         setCategories(prev => [...prev, created].sort((a, b) => a.nome.localeCompare(b.nome)));
         setValue(created.id);
-        table.options.meta?.updateData(index, id, created.id);
+        table.options.meta?.updateData(row.original.id, id, created.id);
         setIsCreating(false);
         setNewCategory('');
         toast.success('Categoria criada');
