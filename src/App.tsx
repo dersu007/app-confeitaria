@@ -2,7 +2,8 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
-import { BaseDeDados } from './components/BaseDeDados';
+import { Insumos } from './components/Insumos';
+import { Financeiro } from './components/Financeiro';
 import { Clientes } from './components/CRM/Clientes';
 import { Pedidos } from './components/Pedidos';
 import { Produtos } from './components/Produtos';
@@ -30,7 +31,8 @@ export default function App() {
             </ProtectedRoute>
           }>
             <Route index element={<Dashboard />} />
-            <Route path="base-de-dados" element={<BaseDeDados />} />
+            <Route path="insumos" element={<Insumos />} />
+            <Route path="financeiro" element={<Financeiro />} />
             <Route path="clientes" element={<Clientes />} />
             <Route path="pedidos" element={<Pedidos />} />
             <Route path="produtos" element={<Produtos />} />

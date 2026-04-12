@@ -60,13 +60,13 @@ export const Layout = () => {
         
         <nav className="flex-grow space-y-1">
           <SidebarLink to="/" icon={LayoutDashboard}>Painel</SidebarLink>
-          <SidebarLink to="/produtos" icon={Database}>Produtos</SidebarLink>
+          <SidebarLink to="/produtos" icon={Cake}>Produtos</SidebarLink>
+          <SidebarLink to="/insumos" icon={Database}>Insumos</SidebarLink>
           <SidebarLink to="/pedidos" icon={ShoppingCart}>Pedidos</SidebarLink>
           <SidebarLink to="/financeiro" icon={CreditCard}>Financeiro</SidebarLink>
           <SidebarLink to="/clientes" icon={Users}>Clientes</SidebarLink>
           <SidebarLink to="/ia" icon={Sparkles}>Assistente IA</SidebarLink>
           <SidebarLink to="/precificacao" icon={Calculator}>Precificação</SidebarLink>
-          <SidebarLink to="/base-de-dados" icon={Database}>Base de Dados</SidebarLink>
         </nav>
         
         <div className="mt-auto pt-4 border-t border-surface-container-high space-y-1">
