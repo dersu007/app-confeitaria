@@ -89,6 +89,55 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
     impostoPercentual
   );
 
+  const handleOpenFichaTecnica = async () => {
+    if (!produto?.id) {
+      if (!nome || !categoriaId) {
+        toast.error('Preencha o nome e a categoria para iniciar a ficha técnica');
+        return;
+      }
+      
+      const loadingToast = toast.loading('Salvando produto inicial...');
+      try {
+        const rawProductData = {
+          user_id: user?.id,
+          nome,
+          categoria_id: categoriaId,
+          rendimento_unidades: rendimentoUnidades,
+          tempo_producao: tempoProducao,
+          custo_hora_trabalho: custoHoraTrabalho,
+          custo_fixo_rateado: custoFixoRateado,
+          custo_embalagem: custoEmbalagem,
+          taxa_venda_percentual: taxaVendaPercentual,
+          imposto_percentual: impostoPercentual,
+          usar_margem_categoria: usarMargemCategoria,
+          margem_percentual: margemPercentual,
+          margem_tipo: margemTipo,
+          usar_preco_manual: usarPrecoManual,
+          preco_venda_manual: precoVendaManual
+        };
+
+        const savedProduct = await dataService.saveProduto(rawProductData as any);
+        if (savedProduct) {
+          toast.success('Produto criado! Agora você pode adicionar ingredientes.', { id: loadingToast });
+          onSave(); // Refresh list
+          // Update local state to reflect we now have an ID
+          setProductToEditState(savedProduct);
+          setShowFichaTecnica(true);
+        }
+      } catch (error: any) {
+        toast.error(`Erro ao criar produto: ${error.message}`, { id: loadingToast });
+      }
+    } else {
+      setShowFichaTecnica(true);
+    }
+  };
+
+  const [productToEditState, setProductToEditState] = useState<Produto | null>(produto || null);
+
+  useEffect(() => {
+    setProductToEditState(produto || null);
+  }, [produto]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nome || !categoriaId) {
@@ -100,8 +149,8 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
 
     try {
       const rawProductData = {
-        id: produto?.id,
-        user_id: produto?.user_id || user?.id,
+        id: productToEditState?.id,
+        user_id: productToEditState?.user_id || user?.id,
         nome,
         categoria_id: categoriaId,
         imagem_url: imagemUrl,
@@ -338,15 +387,13 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
               <div className="p-4 bg-surface-container-low/50 rounded-2xl border border-surface-container-high">
                 <div className="flex justify-between items-center mb-3">
                   <h4 className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Ficha Técnica (Ingredientes)</h4>
-                  {produto?.id && (
-                    <button 
-                      type="button"
-                      onClick={() => setShowFichaTecnica(true)}
-                      className="text-[10px] font-bold text-primary hover:underline flex items-center gap-1"
-                    >
-                      <Plus size={12} /> Editar Ingredientes
-                    </button>
-                  )}
+                  <button 
+                    type="button"
+                    onClick={handleOpenFichaTecnica}
+                    className="text-[10px] font-bold text-primary hover:underline flex items-center gap-1"
+                  >
+                    <Plus size={12} /> {productToEditState?.id ? 'Editar Ingredientes' : 'Salvar e Adicionar Ingredientes'}
+                  </button>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -485,10 +532,10 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
         </div>
       </div>
 
-      {showFichaTecnica && produto && (
+      {showFichaTecnica && productToEditState && (
         <FichaTecnica 
           product={{
-            ...produto,
+            ...productToEditState,
             margem_percentual: margemPercentual,
             margem_tipo: margemTipo,
             usar_preco_manual: usarPrecoManual,
@@ -500,7 +547,7 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
             // Recalculate cost when ingredients change
             const fetchNewCost = async () => {
               try {
-                const data = await dataService.getProdutoById(produto.id);
+                const data = await dataService.getProdutoById(productToEditState.id);
                 if (data) setCustoInsumos(data.custo_total - laborCost - fixedCost);
                 fetchIngredientsCost();
               } catch (error) {

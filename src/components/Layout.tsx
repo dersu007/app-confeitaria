@@ -11,6 +11,7 @@ import {
   Calculator, 
   Settings,
   Database,
+  Tags,
   Search,
   Bell,
   History,
@@ -62,6 +63,7 @@ export const Layout = () => {
           <SidebarLink to="/" icon={LayoutDashboard}>Painel</SidebarLink>
           <SidebarLink to="/produtos" icon={Cake}>Produtos</SidebarLink>
           <SidebarLink to="/insumos" icon={Database}>Insumos</SidebarLink>
+          <SidebarLink to="/categorias" icon={Tags}>Categorias</SidebarLink>
           <SidebarLink to="/pedidos" icon={ShoppingCart}>Pedidos</SidebarLink>
           <SidebarLink to="/financeiro" icon={CreditCard}>Financeiro</SidebarLink>
           <SidebarLink to="/clientes" icon={Users}>Clientes</SidebarLink>

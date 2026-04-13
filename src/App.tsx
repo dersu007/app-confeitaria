@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
 import { Insumos } from './components/Insumos';
+import { Categorias } from './components/Categorias';
 import { Financeiro } from './components/Financeiro';
 import { Clientes } from './components/CRM/Clientes';
 import { Pedidos } from './components/Pedidos';
@@ -32,6 +33,7 @@ export default function App() {
           }>
             <Route index element={<Dashboard />} />
             <Route path="insumos" element={<Insumos />} />
+            <Route path="categorias" element={<Categorias />} />
             <Route path="financeiro" element={<Financeiro />} />
             <Route path="clientes" element={<Clientes />} />
             <Route path="pedidos" element={<Pedidos />} />
