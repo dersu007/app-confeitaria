@@ -17,13 +17,17 @@ import {
   Download,
   Settings,
   X,
-  BookOpen
+  BookOpen,
+  Loader2,
+  Copy
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Produto, Categoria, ProdutoIngrediente } from '../types';
 import { formatCurrency, calculateUnitCost, calculateProductPricing } from '../services/bakeryService';
 import { PieChart as RePieChart, Pie, Cell, ResponsiveContainer, Tooltip as ReTooltip } from 'recharts';
 import { ProductModal } from './Produtos/ProductModal';
+import { DEFAULT_PRODUCT_IMAGE } from '../constants';
+import { ConfirmDialog } from './ui/ConfirmDialog';
 
 export const Produtos = () => {
   const [produtos, setProdutos] = useState<Produto[]>([]);
@@ -35,6 +39,9 @@ export const Produtos = () => {
   const [productIngredients, setProductIngredients] = useState<ProdutoIngrediente[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [productToEdit, setProductToEdit] = useState<Produto | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [productToDelete, setProductToDelete] = useState<Produto | null>(null);
 
   useEffect(() => {
     fetchData();
@@ -85,16 +92,39 @@ export const Produtos = () => {
     setShowModal(true);
   };
 
-  const handleDeleteProduct = async (e: React.MouseEvent, id: string) => {
+  const handleDuplicateProduct = async (e: React.MouseEvent, product: Produto) => {
     e.stopPropagation();
-    if (window.confirm('Tem certeza que deseja excluir este produto?')) {
-      try {
-        await dataService.deleteProduto(id);
-        toast.success('Produto excluído');
-        fetchData();
-      } catch (error) {
-        toast.error('Erro ao excluir produto');
-      }
+    const loadingToast = toast.loading('Duplicando produto...');
+    try {
+      const duplicated = await dataService.duplicateProduct(product.id);
+      toast.success('Produto duplicado com sucesso!', { id: loadingToast });
+      await fetchData();
+      
+      // Open the modal with the new product for further edits if desired
+      setProductToEdit(duplicated);
+      setShowModal(true);
+    } catch (error) {
+      console.error('Erro ao duplicar produto:', error);
+      toast.error('Ocorreu um erro ao duplicar o produto.', { id: loadingToast });
+    }
+  };
+
+  const handleDeleteProduct = async () => {
+    if (!productToDelete) return;
+
+    setIsDeleting(true);
+    try {
+      await dataService.deleteProduto(productToDelete.id);
+      toast.success('Produto excluído com sucesso');
+      setShowDetail(false);
+      setShowDeleteConfirm(false);
+      fetchData();
+    } catch (error: any) {
+      console.error('Erro ao excluir produto:', error);
+      toast.error(error.message || 'Erro ao excluir o produto. Verifique se ele está vinculado a pedidos.');
+    } finally {
+      setIsDeleting(false);
+      setProductToDelete(null);
     }
   };
 
@@ -117,11 +147,26 @@ export const Produtos = () => {
             setProductToEdit(product);
             setShowModal(true);
           }}
+          onDelete={(product) => {
+            setProductToDelete(product);
+            setShowDeleteConfirm(true);
+          }}
+          onDuplicate={(e, product) => handleDuplicateProduct(e, product)}
+          onRefresh={async () => {
+            const data = await dataService.getProdutoById(selectedProduct.id);
+            setSelectedProduct(data);
+            await fetchData();
+          }}
         />
         {showModal && (
           <ProductModal 
             produto={productToEdit}
             onClose={() => setShowModal(false)}
+            onDelete={async (id) => {
+              setProductToDelete(productToEdit);
+              setShowDeleteConfirm(true);
+              setShowModal(false);
+            }}
             onSave={async () => {
               setShowModal(false);
               await fetchData();
@@ -177,16 +222,25 @@ export const Produtos = () => {
           >
             <div className="aspect-video bg-surface-container-low relative overflow-hidden">
               <img 
-                src={produto.imagem_url || "/images/default-box.png"} 
+                src={produto.imagem_url || DEFAULT_PRODUCT_IMAGE} 
                 alt={produto.nome} 
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                 referrerPolicy="no-referrer"
                 onError={(e) => {
-                  (e.target as HTMLImageElement).src = "https://picsum.photos/seed/bakery/400/300";
+                  (e.target as HTMLImageElement).src = DEFAULT_PRODUCT_IMAGE;
                 }}
               />
-              <div className="absolute top-3 right-3 px-2 py-1 bg-white/90 backdrop-blur-sm rounded-lg text-[10px] font-bold text-primary border border-primary/20">
-                {getCategoryName(produto.categoria_id)}
+              <div className="absolute top-3 right-3 flex flex-col gap-2 scale-0 group-hover:scale-100 transition-transform origin-right duration-300">
+                <div className="px-2 py-1 bg-white/90 backdrop-blur-sm rounded-lg text-[10px] font-bold text-primary border border-primary/20 text-center shadow-sm">
+                  {getCategoryName(produto.categoria_id)}
+                </div>
+                <button 
+                  onClick={(e) => handleDuplicateProduct(e, produto)}
+                  className="p-2 bg-primary text-white rounded-lg shadow-lg hover:bg-primary/90 transition-all flex items-center justify-center border border-white/20"
+                  title="Duplicar Produto"
+                >
+                  <Copy size={14} />
+                </button>
               </div>
             </div>
             
@@ -194,7 +248,7 @@ export const Produtos = () => {
               <h3 className="text-lg font-bold headline text-on-surface mb-1 truncate">{produto.nome}</h3>
               <div className="flex items-center gap-2 text-[10px] text-on-surface-variant mb-4">
                 <Clock size={12} />
-                <span>{produto.tempo_producao ? `${produto.tempo_producao} h` : '--'}</span>
+                <span>{produto.tempo_producao_valor ? `${produto.tempo_producao_valor} ${produto.tempo_producao_unidade === 'horas' ? 'h' : 'min'}` : '--'}</span>
                 <span className="mx-1">•</span>
                 <span>{produto.rendimento_unidades} un</span>
               </div>
@@ -237,6 +291,11 @@ export const Produtos = () => {
         <ProductModal 
           produto={productToEdit}
           onClose={() => setShowModal(false)}
+          onDelete={async (id) => {
+            setProductToDelete(productToEdit);
+            setShowDeleteConfirm(true);
+            setShowModal(false);
+          }}
           onSave={async () => {
             setShowModal(false);
             await fetchData();
@@ -253,17 +312,53 @@ export const Produtos = () => {
           }}
         />
       )}
+
+      {/* global ConfirmDialog for products */}
+      <ConfirmDialog 
+        isOpen={showDeleteConfirm}
+        title="Excluir Produto?"
+        description={`Você tem certeza que deseja excluir "${productToDelete?.nome}"? Isso removerá a ficha técnica permanentemente.`}
+        onConfirm={handleDeleteProduct}
+        onCancel={() => { setShowDeleteConfirm(false); setProductToDelete(null); }}
+        isLoading={isDeleting}
+      />
     </div>
   );
 };
 
-const ProductDetail = ({ product, ingredients, onBack, onEdit }: { product: Produto, ingredients: ProdutoIngrediente[], onBack: () => void, onEdit: (product: Produto) => void }) => {
-  const unitCost = product.custo_unitario || 0;
-  
+const ProductDetail = ({ 
+  product, 
+  ingredients, 
+  onBack, 
+  onEdit, 
+  onDelete,
+  onDuplicate,
+  onRefresh
+}: { 
+  product: Produto, 
+  ingredients: ProdutoIngrediente[], 
+  onBack: () => void, 
+  onEdit: (product: Produto) => void,
+  onDelete: (product: Produto) => void,
+  onDuplicate: (e: React.MouseEvent, product: Produto) => void,
+  onRefresh: () => Promise<void>
+}) => {
   const laborCost = product.custo_mao_obra || 0;
   const fixedCost = product.custo_fixo_rateado || 0;
   const ingredientsCost = Math.max(0, product.custo_total - laborCost - fixedCost);
+  const unitCost = product.custo_unitario || 0;
   
+  const handleRemoveImage = async () => {
+    const loadingToast = toast.loading('Removendo imagem...');
+    try {
+      await dataService.saveProduto({ ...product, imagem_url: null });
+      toast.success('Imagem removida', { id: loadingToast });
+      await onRefresh();
+    } catch (error) {
+      toast.error('Erro ao remover imagem', { id: loadingToast });
+    }
+  };
+
   const pieData = [
     { name: 'Insumos', value: product.custo_total > 0 ? (ingredientsCost / product.custo_total) * 100 : 0, color: '#2b6a57' },
     { name: 'Mão de Obra', value: product.custo_total > 0 ? (laborCost / product.custo_total) * 100 : 0, color: '#6a4a2b' },
@@ -281,6 +376,19 @@ const ProductDetail = ({ product, ingredients, onBack, onEdit }: { product: Prod
           <ArrowLeft size={20} /> Voltar para lista
         </button>
         <div className="flex gap-3">
+          <button 
+            onClick={(e) => onDuplicate(e, product)}
+            className="flex items-center gap-2 bg-surface-container-high text-on-surface px-4 py-2 rounded-xl font-bold hover:bg-surface-container-highest transition-all border border-surface-container-highest"
+            title="Duplicar este produto"
+          >
+            <Copy size={18} /> Duplicar
+          </button>
+          <button 
+            onClick={() => onDelete(product)}
+            className="flex items-center gap-2 bg-error/10 text-error px-4 py-2 rounded-xl font-bold hover:bg-error/20 transition-all border border-error/20"
+          >
+            <Trash2 size={18} /> Excluir
+          </button>
           <button 
             onClick={() => onEdit(product)}
             className="flex items-center gap-2 bg-surface-container-high text-on-surface px-4 py-2 rounded-xl font-bold hover:bg-surface-container-highest transition-all"
@@ -301,22 +409,32 @@ const ProductDetail = ({ product, ingredients, onBack, onEdit }: { product: Prod
         {/* Left: Product Image & Main Info */}
         <div className="relative aspect-square lg:aspect-auto lg:h-[450px] rounded-3xl overflow-hidden shadow-2xl group">
           <img 
-            src={product.imagem_url || "/images/default-box.png"} 
+            src={product.imagem_url || DEFAULT_PRODUCT_IMAGE} 
             alt={product.nome} 
             className="w-full h-full object-cover"
             referrerPolicy="no-referrer"
             onError={(e) => {
-              (e.target as HTMLImageElement).src = "https://picsum.photos/seed/bakery/800/600";
+              (e.target as HTMLImageElement).src = DEFAULT_PRODUCT_IMAGE;
             }}
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent flex flex-col justify-end p-8">
             <span className="bg-primary text-white text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full w-fit mb-3">
-              Best Seller
+              Honey Sugar
             </span>
             <h1 className="text-4xl font-extrabold headline text-white mb-2 leading-tight">
               {product.nome}
             </h1>
           </div>
+          
+          {product.imagem_url && (
+            <button 
+              onClick={handleRemoveImage}
+              className="absolute top-4 right-4 p-3 bg-white/20 backdrop-blur-md text-white rounded-xl opacity-0 group-hover:opacity-100 transition-all hover:bg-error hover:text-white"
+              title="Remover Imagem"
+            >
+              <Trash2 size={20} />
+            </button>
+          )}
         </div>
 
         {/* Right: Quick Stats & Pricing */}
@@ -325,8 +443,8 @@ const ProductDetail = ({ product, ingredients, onBack, onEdit }: { product: Prod
             <div className="bg-white p-6 rounded-2xl border border-surface-container-high shadow-sm">
               <span className="text-[10px] uppercase font-bold text-on-surface-variant block mb-2">Tempo Total</span>
               <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-extrabold headline text-on-surface">{product.tempo_producao || '--'}</span>
-                <span className="text-xs font-bold text-on-surface-variant uppercase">HORAS</span>
+                <span className="text-3xl font-extrabold headline text-on-surface">{product.tempo_producao_valor || '--'}</span>
+                <span className="text-xs font-bold text-on-surface-variant uppercase">{product.tempo_producao_unidade || 'HORAS'}</span>
               </div>
               <p className="text-[10px] text-on-surface-variant mt-2 italic">Incluindo fermentação fria</p>
             </div>
@@ -491,7 +609,10 @@ const ProductDetail = ({ product, ingredients, onBack, onEdit }: { product: Prod
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                   </Pie>
-                  <ReTooltip />
+                  <ReTooltip 
+                    formatter={(value: number) => [`${value.toFixed(1)}%`, 'Porcentagem']}
+                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                  />
                 </RePieChart>
               </ResponsiveContainer>
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
@@ -516,17 +637,18 @@ const ProductDetail = ({ product, ingredients, onBack, onEdit }: { product: Prod
 
           {/* Labor & Operation */}
           <div className="bg-white rounded-3xl border border-surface-container-high shadow-sm p-8">
-            <h3 className="text-sm font-bold uppercase tracking-widest text-on-surface-variant mb-8">Mão de Obra & Operação</h3>
+            <h3 className="text-sm font-bold uppercase tracking-widest text-on-surface-variant mb-8">Detalhamento de Custos Operacionais</h3>
             
             <div className="space-y-6">
               <div className="bg-surface-container-low p-5 rounded-2xl border border-surface-container-high">
                 <div className="flex justify-between items-start mb-4">
                   <div>
                     <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Mão de Obra</span>
-                    <span className="text-lg font-bold text-on-surface">{product.tempo_producao || 0} Horas</span>
+                    <span className="text-lg font-bold text-on-surface">{product.tempo_producao_valor || 0} {product.tempo_producao_unidade}</span>
+                    <p className="text-[10px] text-on-surface-variant">Custo/Hora: {formatCurrency(product.custo_hora_trabalho || 0)}</p>
                   </div>
                   <div className="text-right">
-                    <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Custo Est.</span>
+                    <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Custo Total MO</span>
                     <span className="text-lg font-bold text-primary">{formatCurrency(laborCost)}</span>
                   </div>
                 </div>
@@ -538,14 +660,23 @@ const ProductDetail = ({ product, ingredients, onBack, onEdit }: { product: Prod
                 </div>
               </div>
 
-              <div className="bg-surface-container-low p-5 rounded-2xl border border-surface-container-high">
-                <div className="flex justify-between items-start">
+              <div className="grid grid-cols-1 gap-4">
+                <div className="bg-surface-container-low p-5 rounded-2xl border border-surface-container-high flex justify-between items-center">
                   <div>
-                    <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Custos Fixos (Rateio)</span>
-                    <span className="text-lg font-bold text-on-surface">Rateio</span>
+                    <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Embalagem</span>
+                    <span className="text-sm font-bold text-on-surface">Custo por Unidade</span>
                   </div>
                   <div className="text-right">
-                    <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Custo Est.</span>
+                    <span className="text-lg font-bold text-primary">{formatCurrency(product.custo_embalagem || 0)}</span>
+                  </div>
+                </div>
+
+                <div className="bg-surface-container-low p-5 rounded-2xl border border-surface-container-high flex justify-between items-center">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Custos Fixos (Rateio)</span>
+                    <span className="text-sm font-bold text-on-surface">Rateio Proporcional</span>
+                  </div>
+                  <div className="text-right">
                     <span className="text-lg font-bold text-primary">{formatCurrency(fixedCost)}</span>
                   </div>
                 </div>

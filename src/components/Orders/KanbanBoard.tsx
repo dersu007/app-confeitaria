@@ -27,7 +27,7 @@ interface KanbanBoardProps {
   onOrderClick: (pedido: Pedido) => void;
 }
 
-const COLUMNS: Pedido['status'][] = ['Em preparação', 'Pronto', 'Em entrega', 'Concluído'];
+const COLUMNS: Pedido['status'][] = ['Em preparação', 'Pronto', 'Em entrega', 'Concluído', 'Cancelado'];
 
 export const KanbanBoard = ({ pedidos, onStatusChange, onOrderClick }: KanbanBoardProps) => {
   const sensors = useSensors(
@@ -49,8 +49,8 @@ export const KanbanBoard = ({ pedidos, onStatusChange, onOrderClick }: KanbanBoa
     const overId = over.id;
 
     // If dropped over a column
-    if (COLUMNS.includes(overId)) {
-      onStatusChange(activeId, overId);
+    if (COLUMNS.includes(overId as Pedido['status'])) {
+      onStatusChange(activeId, overId as Pedido['status']);
     } 
     // If dropped over another item
     else {
@@ -67,7 +67,7 @@ export const KanbanBoard = ({ pedidos, onStatusChange, onOrderClick }: KanbanBoa
       collisionDetection={closestCenter}
       onDragEnd={handleDragEnd}
     >
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 h-full min-h-[600px]">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6 h-full min-h-[600px]">
         {COLUMNS.map(status => (
           <KanbanColumn 
             key={status} 
@@ -90,6 +90,7 @@ const KanbanColumn: React.FC<{ status: Pedido['status'], pedidos: Pedido[], onOr
       case 'Pronto': return 'bg-emerald-500';
       case 'Em entrega': return 'bg-blue-500';
       case 'Concluído': return 'bg-slate-500';
+      case 'Cancelado': return 'bg-error';
       default: return 'bg-gray-500';
     }
   };

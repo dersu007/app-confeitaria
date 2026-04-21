@@ -34,6 +34,7 @@ export const Pedidos = () => {
   const [showModal, setShowModal] = useState(false);
   const [selectedPedido, setSelectedPedido] = useState<Pedido | null>(null);
   const [showDetails, setShowDetails] = useState(false);
+  const [isRecalculating, setIsRecalculating] = useState(false);
 
   useEffect(() => {
     fetchPedidos();
@@ -49,6 +50,21 @@ export const Pedidos = () => {
       toast.error('Erro ao carregar pedidos');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRecalculate = async () => {
+    setIsRecalculating(true);
+    const loadingToast = toast.loading('Recalculando toda a base de dados...');
+    try {
+      await dataService.recalculateEverything();
+      await fetchPedidos();
+      toast.success('Recálculo completo: Produtos e LTV atualizados!', { id: loadingToast });
+    } catch (error) {
+      console.error('Erro ao recalcular:', error);
+      toast.error('Ocorreu um erro ao recalcular a base.', { id: loadingToast });
+    } finally {
+      setIsRecalculating(false);
     }
   };
 
@@ -127,7 +143,7 @@ export const Pedidos = () => {
           />
         </div>
         <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0">
-          {['Todos', 'Em preparação', 'Pronto', 'Em entrega', 'Concluído'].map((s) => (
+          {['Todos', 'Em preparação', 'Pronto', 'Em entrega', 'Concluído', 'Cancelado'].map((s) => (
             <button
               key={s}
               onClick={() => setStatusFilter(s)}
@@ -137,12 +153,24 @@ export const Pedidos = () => {
             </button>
           ))}
         </div>
-        <button 
-          onClick={fetchPedidos}
-          className="p-2.5 text-on-surface-variant hover:bg-surface-container-low rounded-xl transition-all border border-surface-container-high"
-        >
-          <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
-        </button>
+        <div className="flex gap-2 ml-auto">
+          <button 
+            onClick={fetchPedidos}
+            className="p-2.5 text-on-surface-variant hover:bg-surface-container-low rounded-xl transition-all border border-surface-container-high"
+            title="Atualizar lista"
+          >
+            <RefreshCw size={18} className={loading && !isRecalculating ? 'animate-spin' : ''} />
+          </button>
+          <button 
+            onClick={handleRecalculate}
+            disabled={isRecalculating}
+            className="flex items-center gap-2 px-4 py-2.5 bg-surface-container-low text-primary font-bold rounded-xl border border-primary/20 hover:bg-primary/5 transition-all text-xs disabled:opacity-50"
+            title="Sincroniza custos de produtos e métricas de clientes"
+          >
+            <RefreshCw size={16} className={isRecalculating ? 'animate-spin' : ''} />
+            <span className="hidden sm:inline">Recalcular Tudo</span>
+          </button>
+        </div>
       </div>
 
       {/* Main Content Area */}
@@ -238,6 +266,7 @@ export const Pedidos = () => {
           pedido={selectedPedido} 
           onClose={() => setShowDetails(false)} 
           onEdit={() => { setShowDetails(false); setShowModal(true); }} 
+          onDelete={fetchPedidos}
         />
       )}
     </div>

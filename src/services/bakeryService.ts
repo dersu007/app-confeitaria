@@ -134,7 +134,8 @@ export const sanitizeProductUpdate = (productData: any) => {
     'nome',
     'categoria_id',
     'rendimento_unidades',
-    'tempo_producao',
+    'tempo_producao_valor',
+    'tempo_producao_unidade',
     'margem_percentual',
     'usar_preco_manual',
     'preco_venda_manual',
@@ -166,18 +167,14 @@ export const sanitizeProductUpdate = (productData: any) => {
   // Apply fallbacks to the input data if needed
   const dataWithFallbacks = { ...productData };
   
-  if (dataWithFallbacks.imagem_url === '' || dataWithFallbacks.imagem_url === undefined) {
+  // Only apply defaults if the field is explicitly provided as empty or if we want to ensure a specific type
+  // But DO NOT set defaults for fields that are missing from the input object, 
+  // as this causes data loss during partial updates (like recalculateProduct)
+  
+  if (dataWithFallbacks.imagem_url === '') {
     dataWithFallbacks.imagem_url = null;
   }
   
-  if (dataWithFallbacks.modo_preparo === undefined) {
-    dataWithFallbacks.modo_preparo = "";
-  }
-  
-  if (dataWithFallbacks.tempo_producao === undefined) {
-    dataWithFallbacks.tempo_producao = 0;
-  }
-
   // Add core fields if they are defined
   coreFields.forEach(field => {
     if (dataWithFallbacks[field] !== undefined) {

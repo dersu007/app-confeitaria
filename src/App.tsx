@@ -12,6 +12,7 @@ import { Precificacao } from './components/Precificacao';
 import { Toaster } from 'react-hot-toast';
 import { Login } from './components/Login';
 import { Register } from './components/Register';
+import { ResetPassword } from './components/ResetPassword';
 import { AuthProvider } from './lib/auth';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
@@ -24,6 +25,7 @@ export default function App() {
           {/* Public Routes */}
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
 
           {/* Protected Routes */}
           <Route path="/" element={

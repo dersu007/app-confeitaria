@@ -2,23 +2,26 @@ import React, { useState, useEffect } from 'react';
 import { dataService } from '../../services/dataService';
 import { useAuth } from '../../lib/auth';
 import { Produto, Categoria } from '../../types';
-import { X, Plus, Package, Image, Clock, Calculator, Save, Weight, DollarSign } from 'lucide-react';
+import { X, Plus, Package, Image, Clock, Calculator, Save, Weight, DollarSign, Upload, Loader2, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { formatCurrency, calculateProductPricing, calculateUnitCost, resolveProductMargin } from '../../services/bakeryService';
 import { FichaTecnica } from '../FichaTecnica';
+import { DEFAULT_PRODUCT_IMAGE } from '../../constants';
 
 interface ProductModalProps {
   produto?: Produto | null;
   onClose: () => void;
   onSave: () => void;
+  onDelete?: (id: string) => Promise<void>;
 }
 
-export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) => {
+export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModalProps) => {
   const { user } = useAuth();
   const [nome, setNome] = useState(produto?.nome || '');
   const [categoriaId, setCategoriaId] = useState(produto?.categoria_id || '');
   const [imagemUrl, setImagemUrl] = useState(produto?.imagem_url || '');
-  const [tempoProducao, setTempoProducao] = useState(produto?.tempo_producao || 0);
+  const [tempoProducaoValor, setTempoProducaoValor] = useState(produto?.tempo_producao_valor || 0);
+  const [tempoProducaoUnidade, setTempoProducaoUnidade] = useState<'horas' | 'minutos'>(produto?.tempo_producao_unidade || 'horas');
   const [modoPreparo, setModoPreparo] = useState(produto?.modo_preparo || '');
   const [rendimentoUnidades, setRendimentoUnidades] = useState(produto?.rendimento_unidades || 1);
   const [pesoFinal, setPesoFinal] = useState(produto?.peso_final_produto || 0);
@@ -37,6 +40,9 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [showFichaTecnica, setShowFichaTecnica] = useState(false);
   const [custoInsumos, setCustoInsumos] = useState(0);
+  const [uploading, setUploading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -67,7 +73,8 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
     }
   };
 
-  const laborCost = (Number(tempoProducao) || 0) * (Number(custoHoraTrabalho) || 0);
+  const tempoEmHoras = tempoProducaoUnidade === 'minutos' ? (Number(tempoProducaoValor) || 0) / 60 : (Number(tempoProducaoValor) || 0);
+  const laborCost = tempoEmHoras * (Number(custoHoraTrabalho) || 0);
   const fixedCost = Number(custoFixoRateado) || 0;
   const fullTotalCost = custoInsumos + laborCost + fixedCost;
   const currentUnitCost = calculateUnitCost(fullTotalCost, rendimentoUnidades);
@@ -91,8 +98,8 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
 
   const handleOpenFichaTecnica = async () => {
     if (!produto?.id) {
-      if (!nome || !categoriaId) {
-        toast.error('Preencha o nome e a categoria para iniciar a ficha técnica');
+      if (!nome) {
+        toast.error('Preencha o nome para iniciar a ficha técnica');
         return;
       }
       
@@ -101,9 +108,10 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
         const rawProductData = {
           user_id: user?.id,
           nome,
-          categoria_id: categoriaId,
+          categoria_id: categoriaId || null,
           rendimento_unidades: rendimentoUnidades,
-          tempo_producao: tempoProducao,
+          tempo_producao_valor: tempoProducaoValor,
+          tempo_producao_unidade: tempoProducaoUnidade,
           custo_hora_trabalho: custoHoraTrabalho,
           custo_fixo_rateado: custoFixoRateado,
           custo_embalagem: custoEmbalagem,
@@ -138,10 +146,47 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
     setProductToEditState(produto || null);
   }, [produto]);
 
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const loadingToast = toast.loading('Enviando imagem...');
+    setUploading(true);
+    try {
+      const url = await dataService.uploadImage(file, 'produtos');
+      setImagemUrl(url);
+      toast.success('Imagem enviada com sucesso!', { id: loadingToast });
+    } catch (error: any) {
+      console.error('Erro no upload:', error);
+      toast.error('Erro ao enviar imagem. Verifique se o bucket "produtos" existe no Supabase.', { id: loadingToast });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!produto?.id || !onDelete) return;
+    
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      return;
+    }
+
+    setDeleting(true);
+    try {
+      await onDelete(produto.id);
+    } catch (error) {
+      console.error('Erro ao excluir no modal:', error);
+    } finally {
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!nome || !categoriaId) {
-      toast.error('Nome e categoria são obrigatórios');
+    if (!nome) {
+      toast.error('O nome do produto é obrigatório');
       return;
     }
 
@@ -152,9 +197,10 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
         id: productToEditState?.id,
         user_id: productToEditState?.user_id || user?.id,
         nome,
-        categoria_id: categoriaId,
+        categoria_id: categoriaId || null,
         imagem_url: imagemUrl,
-        tempo_producao: tempoProducao,
+        tempo_producao_valor: tempoProducaoValor,
+        tempo_producao_unidade: tempoProducaoUnidade,
         custo_hora_trabalho: custoHoraTrabalho,
         custo_mao_obra: laborCost,
         custo_fixo_rateado: custoFixoRateado,
@@ -233,12 +279,11 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Categoria</label>
                   <select 
-                    required
                     value={categoriaId}
                     onChange={e => setCategoriaId(e.target.value)}
                     className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
                   >
-                    <option value="">Selecione...</option>
+                    <option value="">Sem Categoria</option>
                     {categorias.map(c => (
                       <option key={c.id} value={c.id}>{c.nome}</option>
                     ))}
@@ -249,16 +294,24 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest flex items-center gap-1.5">
-                    <Clock size={12} /> Tempo Produção (horas)
+                    <Clock size={12} /> Tempo Produção
                   </label>
                   <div className="flex gap-2">
                     <input 
                       type="number"
-                      value={tempoProducao}
-                      onChange={e => setTempoProducao(Number(e.target.value))}
+                      value={tempoProducaoValor}
+                      onChange={e => setTempoProducaoValor(Number(e.target.value))}
                       placeholder="0"
                       className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
                     />
+                    <select
+                      value={tempoProducaoUnidade}
+                      onChange={e => setTempoProducaoUnidade(e.target.value as 'horas' | 'minutos')}
+                      className="w-32 px-2 py-2.5 bg-surface-container-low border-none rounded-xl text-xs focus:ring-2 focus:ring-primary/20"
+                    >
+                      <option value="horas">Horas</option>
+                      <option value="minutos">Minutos</option>
+                    </select>
                   </div>
                 </div>
                 <div className="space-y-1.5">
@@ -352,23 +405,45 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
 
               <div className="space-y-1.5">
                 <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest flex items-center gap-1.5">
-                  <Image size={12} /> URL da Imagem
+                  <Image size={12} /> Imagem do Produto
                 </label>
-                <input 
-                  type="text"
-                  value={imagemUrl}
-                  onChange={e => setImagemUrl(e.target.value)}
-                  placeholder="https://..."
-                  className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
-                />
+                <div className="flex gap-2">
+                  <input 
+                    type="text"
+                    value={imagemUrl}
+                    onChange={e => setImagemUrl(e.target.value)}
+                    placeholder="URL da imagem ou faça upload..."
+                    className="flex-grow px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
+                  />
+                  <label className="cursor-pointer p-2.5 bg-primary/10 text-primary rounded-xl hover:bg-primary/20 transition-all flex items-center justify-center min-w-[44px]">
+                    {uploading ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      className="hidden" 
+                      onChange={handleImageUpload}
+                      disabled={uploading}
+                    />
+                  </label>
+                </div>
                 {imagemUrl && (
-                  <div className="mt-2 aspect-video w-full rounded-xl overflow-hidden border border-surface-container-high">
+                  <div className="mt-2 aspect-video w-full rounded-xl overflow-hidden border border-surface-container-high relative group">
                     <img 
-                      src={imagemUrl} 
+                      src={imagemUrl || DEFAULT_PRODUCT_IMAGE} 
                       alt="Preview" 
                       className="w-full h-full object-cover"
                       referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = DEFAULT_PRODUCT_IMAGE;
+                      }}
                     />
+                    <button 
+                      type="button"
+                      onClick={() => setImagemUrl('')}
+                      className="absolute top-2 right-2 p-1.5 bg-black/50 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X size={14} />
+                    </button>
                   </div>
                 )}
               </div>
@@ -515,20 +590,56 @@ export const ProductModal = ({ produto, onClose, onSave }: ProductModalProps) =>
           </div>
         </form>
 
-        <div className="p-6 border-t border-surface-container-high bg-surface-container-low/50 flex justify-end gap-3">
-          <button 
-            type="button"
-            onClick={onClose}
-            className="px-8 py-3 bg-surface-container-high text-on-surface font-bold rounded-2xl hover:bg-surface-container-highest transition-all"
-          >
-            Cancelar
-          </button>
-          <button 
-            onClick={handleSubmit}
-            className="flex items-center gap-2 px-12 py-3 bg-primary text-white font-bold rounded-2xl hover:bg-primary/90 transition-all shadow-xl shadow-primary/20"
-          >
-            <Save size={18} /> Salvar Produto
-          </button>
+        <div className="p-6 border-t border-surface-container-high bg-surface-container-low/50 flex justify-between items-center gap-3">
+          <div>
+            {produto?.id && onDelete && (
+              <div className="flex items-center gap-2">
+                {confirmDelete ? (
+                  <div className="flex items-center gap-2 animate-in fade-in slide-in-from-left-2 duration-200">
+                    <button 
+                      type="button"
+                      onClick={() => setConfirmDelete(false)}
+                      className="px-4 py-2 bg-surface-container-high text-on-surface text-xs font-bold rounded-xl hover:bg-surface-container-highest transition-all"
+                    >
+                      Cancelar
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={handleDelete}
+                      disabled={deleting}
+                      className={`flex items-center gap-2 px-6 py-3 bg-error text-white font-bold rounded-2xl hover:bg-error/90 transition-all shadow-lg shadow-error/20 ${deleting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      {deleting ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />}
+                      {deleting ? 'Excluindo...' : 'Confirmar Exclusão'}
+                    </button>
+                  </div>
+                ) : (
+                  <button 
+                    type="button"
+                    onClick={() => setConfirmDelete(true)}
+                    className="flex items-center gap-2 px-6 py-3 bg-error/10 text-error font-bold rounded-2xl hover:bg-error/20 transition-all border border-error/20"
+                  >
+                    <Trash2 size={18} /> Excluir Produto
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="flex gap-3">
+            <button 
+              type="button"
+              onClick={onClose}
+              className="px-8 py-3 bg-surface-container-high text-on-surface font-bold rounded-2xl hover:bg-surface-container-highest transition-all"
+            >
+              Cancelar
+            </button>
+            <button 
+              onClick={handleSubmit}
+              className="flex items-center gap-2 px-12 py-3 bg-primary text-white font-bold rounded-2xl hover:bg-primary/90 transition-all shadow-xl shadow-primary/20"
+            >
+              <Save size={18} /> Salvar Produto
+            </button>
+          </div>
         </div>
       </div>
 

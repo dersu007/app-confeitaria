@@ -67,11 +67,11 @@ export const Precificacao = () => {
   };
 
   const recalculateAll = async () => {
-    const loadingToast = toast.loading('Recalculando todos os produtos...');
+    const loadingToast = toast.loading('Recalculando toda a base (Produtos e Pedidos)...');
     try {
-      await dataService.recalculateAllProducts();
+      await dataService.recalculateEverything();
       await fetchData();
-      toast.success('Todos os produtos foram recalculados!', { id: loadingToast });
+      toast.success('Base de dados totalmente sincronizada!', { id: loadingToast });
     } catch (err: any) {
       console.error('Erro no recálculo global:', err);
       toast.error(`Erro no recálculo: ${err.message}`, { id: loadingToast });

@@ -11,9 +11,13 @@ import {
   TrendingUp,
   ChevronRight,
   User,
-  ShoppingBag
+  ShoppingBag,
+  Trash2,
+  AlertTriangle
 } from 'lucide-react';
 import { formatCurrency } from '../../services/bakeryService';
+import { dataService } from '../../services/dataService';
+import toast from 'react-hot-toast';
 import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -21,9 +25,28 @@ interface OrderDetailsProps {
   pedido: Pedido;
   onClose: () => void;
   onEdit: () => void;
+  onDelete?: () => void;
 }
 
-export const OrderDetails = ({ pedido, onClose, onEdit }: OrderDetailsProps) => {
+export const OrderDetails = ({ pedido, onClose, onEdit, onDelete }: OrderDetailsProps) => {
+  const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
+  const [isDeleting, setIsDeleting] = React.useState(false);
+
+  const handleDelete = async () => {
+    setIsDeleting(true);
+    try {
+      await dataService.deleteEntity('pedidos', pedido.id);
+      toast.success('Pedido excluído com sucesso');
+      onDelete?.();
+      onClose();
+    } catch (error) {
+      toast.error('Erro ao excluir pedido');
+    } finally {
+      setIsDeleting(false);
+      setShowDeleteConfirm(false);
+    }
+  };
+
   const totalCusto = pedido.itens?.reduce((acc, item) => acc + (item.custo_unitario * item.quantidade), 0) || 0;
   const margem = pedido.valor_total - totalCusto;
   const margemPercentual = (margem / pedido.valor_total) * 100;
@@ -45,6 +68,13 @@ export const OrderDetails = ({ pedido, onClose, onEdit }: OrderDetailsProps) => 
           </div>
           <div className="flex items-center gap-3">
             <button 
+              onClick={() => setShowDeleteConfirm(true)}
+              className="p-2.5 text-error hover:bg-error/10 rounded-xl transition-all"
+              title="Excluir Pedido"
+            >
+              <Trash2 size={20} />
+            </button>
+            <button 
               onClick={onEdit}
               className="px-4 py-2 bg-primary text-white font-bold rounded-xl hover:bg-primary/90 transition-all text-xs"
             >
@@ -55,6 +85,37 @@ export const OrderDetails = ({ pedido, onClose, onEdit }: OrderDetailsProps) => 
             </button>
           </div>
         </div>
+
+        {/* Confirmation Modal */}
+        {showDeleteConfirm && (
+          <div className="absolute inset-0 z-[60] bg-surface/80 backdrop-blur-sm flex items-center justify-center p-6 bg-slate-900/40">
+            <div className="bg-white p-8 rounded-3xl shadow-2xl border border-surface-container-high max-w-sm w-full text-center animate-in zoom-in duration-200">
+              <div className="w-16 h-16 bg-error/10 text-error rounded-full flex items-center justify-center mx-auto mb-6">
+                <AlertTriangle size={32} />
+              </div>
+              <h3 className="text-xl font-bold text-on-surface mb-2">Excluir Pedido?</h3>
+              <p className="text-on-surface-variant text-sm mb-8 leading-relaxed">
+                Esta ação não pode ser desfeita. O histórico do pedido e as métricas do cliente serão afetados.
+              </p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setShowDeleteConfirm(false)}
+                  disabled={isDeleting}
+                  className="flex-1 px-4 py-3 bg-surface-container-low text-on-surface font-bold rounded-xl hover:bg-surface-container-high transition-all"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={handleDelete}
+                  disabled={isDeleting}
+                  className="flex-1 px-4 py-3 bg-error text-white font-bold rounded-xl hover:bg-error/90 transition-all shadow-lg shadow-error/20 flex items-center justify-center gap-2"
+                >
+                  {isDeleting ? 'Excluindo...' : 'Sim, Excluir'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="flex-grow overflow-y-auto p-8 space-y-10">
           {/* Header Stats */}

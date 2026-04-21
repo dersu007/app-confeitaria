@@ -17,6 +17,8 @@ export interface Ingrediente {
   preco_por_unidade_base: number;
   fornecedor?: string;
   data_atualizacao: string;
+  estoque_minimo: number;
+  estoque_atual: number;
 }
 
 export interface Produto {
@@ -28,7 +30,8 @@ export interface Produto {
   peso_final_produto: number;
   custo_total: number;
   custo_unitario: number;
-  tempo_producao: number;
+  tempo_producao_valor: number;
+  tempo_producao_unidade: 'horas' | 'minutos';
   custo_hora_trabalho: number;
   custo_mao_obra: number;
   custo_fixo_rateado: number;
@@ -83,7 +86,7 @@ export interface Cliente {
   ultima_compra?: string;
   dias_desde_ultima_compra: number;
   frequencia_compra: number;
-  segmento: 'Novo' | 'Frequente' | 'VIP' | 'Inativo';
+  status: 'VIP' | 'Frequente' | 'Novo' | 'Inativo';
 }
 
 export interface Pedido {

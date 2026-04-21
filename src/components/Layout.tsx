@@ -15,10 +15,14 @@ import {
   Search,
   Bell,
   History,
-  LogOut
+  LogOut,
+  RefreshCw,
+  AlertTriangle
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useAuth } from '../lib/auth';
+import { dataService } from '../services/dataService';
+import { Ingrediente } from '../types';
 
 const SidebarLink = ({ to, icon: Icon, children }: { to: string, icon: any, children: React.ReactNode }) => (
   <NavLink 
@@ -38,6 +42,24 @@ const SidebarLink = ({ to, icon: Icon, children }: { to: string, icon: any, chil
 export const Layout = () => {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
+  const [criticalStockCount, setCriticalStockCount] = React.useState(0);
+
+  React.useEffect(() => {
+    const fetchStockStatus = async () => {
+      try {
+        const ingredients = await dataService.getIngredientes();
+        const count = ingredients.filter(i => (i.estoque_atual || 0) <= (i.estoque_minimo || 0)).length;
+        setCriticalStockCount(count);
+      } catch (err) {
+        console.error('Erro ao buscar status de estoque:', err);
+      }
+    };
+
+    fetchStockStatus();
+    // Refresh every 5 minutes
+    const interval = setInterval(fetchStockStatus, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleSignOut = async () => {
     try {
@@ -55,16 +77,16 @@ export const Layout = () => {
       {/* Sidebar */}
       <aside className="h-screen w-64 fixed left-0 top-0 bg-slate-50 border-r border-surface-container-high flex flex-col p-4 gap-2 z-50">
         <div className="text-primary font-bold text-lg mb-8 px-4 flex flex-col">
-          <span className="headline">The Digital Boulangerie</span>
+          <span className="headline">Honey Sugar</span>
           <span className="text-xs font-medium text-on-surface-variant opacity-70">Gestão Profissional</span>
         </div>
         
         <nav className="flex-grow space-y-1">
           <SidebarLink to="/" icon={LayoutDashboard}>Painel</SidebarLink>
+          <SidebarLink to="/pedidos" icon={ShoppingCart}>Pedidos</SidebarLink>
           <SidebarLink to="/produtos" icon={Cake}>Produtos</SidebarLink>
           <SidebarLink to="/insumos" icon={Database}>Insumos</SidebarLink>
           <SidebarLink to="/categorias" icon={Tags}>Categorias</SidebarLink>
-          <SidebarLink to="/pedidos" icon={ShoppingCart}>Pedidos</SidebarLink>
           <SidebarLink to="/financeiro" icon={CreditCard}>Financeiro</SidebarLink>
           <SidebarLink to="/clientes" icon={Users}>Clientes</SidebarLink>
           <SidebarLink to="/ia" icon={Sparkles}>Assistente IA</SidebarLink>
@@ -97,9 +119,35 @@ export const Layout = () => {
           </div>
           
           <div className="flex items-center gap-2">
-            <button className="p-2 text-on-surface-variant hover:bg-slate-50 rounded-full transition-all">
-              <Bell size={20} />
-            </button>
+            <div className="relative">
+              <button 
+                onClick={() => {
+                  if (criticalStockCount > 0) {
+                    toast(`Existem ${criticalStockCount} insumos com estoque crítico!`, {
+                      icon: '⚠️',
+                      duration: 4000,
+                      style: {
+                        borderRadius: '12px',
+                        background: '#fff',
+                        color: '#6a4a2b',
+                        fontWeight: 'bold',
+                        border: '1px solid #efe0cd'
+                      }
+                    });
+                  } else {
+                    toast.success('Todos os insumos estão com estoque em dia!');
+                  }
+                }}
+                className="p-2 text-on-surface-variant hover:bg-slate-50 rounded-full transition-all relative"
+              >
+                <Bell size={20} />
+                {criticalStockCount > 0 && (
+                  <span className="absolute top-1 right-1 w-4 h-4 bg-error text-white text-[10px] font-bold rounded-full flex items-center justify-center animate-bounce">
+                    {criticalStockCount}
+                  </span>
+                )}
+              </button>
+            </div>
             <button className="p-2 text-on-surface-variant hover:bg-slate-50 rounded-full transition-all">
               <History size={20} />
             </button>

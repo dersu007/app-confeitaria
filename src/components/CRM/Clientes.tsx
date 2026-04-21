@@ -14,12 +14,14 @@ import {
   ChevronRight,
   Star,
   Clock,
-  ShoppingBag
+  ShoppingBag,
+  Trash2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { formatCurrency } from '../../services/bakeryService';
 import { format, differenceInDays, parseISO, isAfter, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 
 export const Clientes = () => {
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -28,10 +30,61 @@ export const Clientes = () => {
   const [activeFilter, setActiveFilter] = useState<'Todos' | 'VIP' | 'Frequente' | 'Novo' | 'Inativo'>('Todos');
   const [showModal, setShowModal] = useState(false);
   const [editingCliente, setEditingCliente] = useState<Cliente | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [clienteToDelete, setClienteToDelete] = useState<Cliente | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     fetchClientes();
   }, []);
+
+  const handleExportCSV = () => {
+    if (filteredClientes.length === 0) {
+      toast.error('Não há clientes para exportar');
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const headers = ['Nome', 'E-mail', 'Telefone', 'Status', 'Total de Pedidos', 'Total Gasto (LTV)', 'Última Compra'];
+      
+      const rows = filteredClientes.map(c => [
+        c.nome,
+        c.email || '',
+        c.telefone || '',
+        c.status,
+        c.total_pedidos.toString(),
+        c.valor_total_gasto.toFixed(2).replace('.', ','),
+        c.ultima_compra ? format(parseISO(c.ultima_compra), 'dd/MM/yyyy') : 'Nunca comprou'
+      ]);
+
+      const csvContent = [
+        headers.join(';'),
+        ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(';'))
+      ].join('\n');
+
+      const bom = '\uFEFF';
+      const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const dateStr = format(new Date(), 'yyyy-MM-dd');
+      
+      link.setAttribute('href', url);
+      link.setAttribute('download', `clientes_honey_sugar_${dateStr}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      toast.success('Exportação concluída!');
+    } catch (error) {
+      console.error('Erro na exportação:', error);
+      toast.error('Erro ao gerar arquivo');
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const fetchClientes = async () => {
     setLoading(true);
@@ -45,16 +98,34 @@ export const Clientes = () => {
     }
   };
 
+  const handleDeleteCliente = async () => {
+    if (!clienteToDelete) return;
+    
+    setIsDeleting(true);
+    try {
+      await dataService.deleteCliente(clienteToDelete.id);
+      setClientes(prev => prev.filter(c => c.id !== clienteToDelete.id));
+      toast.success('Cliente removido com sucesso');
+      setShowDeleteConfirm(false);
+    } catch (error: any) {
+      console.error('Erro ao excluir cliente:', error);
+      toast.error(error.message || 'Erro ao excluir cliente');
+    } finally {
+      setIsDeleting(false);
+      setClienteToDelete(null);
+    }
+  };
+
   const filteredClientes = clientes.filter(c => {
     const matchesSearch = c.nome.toLowerCase().includes(searchTerm.toLowerCase()) || 
                          c.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          c.telefone?.includes(searchTerm);
-    const matchesFilter = activeFilter === 'Todos' || c.segmento === activeFilter;
+    const matchesFilter = activeFilter === 'Todos' || c.status === activeFilter;
     return matchesSearch && matchesFilter;
   });
 
-  const getSegmentColor = (segmento: string) => {
-    switch (segmento) {
+  const getStatusColor = (status: string) => {
+    switch (status) {
       case 'VIP': return 'bg-amber-100 text-amber-700 border-amber-200';
       case 'Frequente': return 'bg-blue-100 text-blue-700 border-blue-200';
       case 'Novo': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
@@ -135,8 +206,13 @@ export const Clientes = () => {
               </button>
             ))}
           </div>
-          <button className="p-2.5 text-on-surface-variant hover:bg-surface-container-low rounded-xl transition-all border border-surface-container-high">
-            <Download size={18} />
+          <button 
+            onClick={handleExportCSV}
+            disabled={isExporting}
+            className="p-2.5 text-on-surface-variant hover:bg-surface-container-low rounded-xl transition-all border border-surface-container-high disabled:opacity-50"
+            title="Exportar para Excel"
+          >
+            <Download size={18} className={isExporting ? 'animate-bounce' : ''} />
           </button>
         </div>
 
@@ -173,8 +249,8 @@ export const Clientes = () => {
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${getSegmentColor(cliente.segmento)}`}>
-                        {cliente.segmento}
+                      <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${getStatusColor(cliente.status)}`}>
+                        {cliente.status}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-center font-medium text-sm text-on-surface">
@@ -195,12 +271,22 @@ export const Clientes = () => {
                       )}
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <button 
-                        onClick={() => { setEditingCliente(cliente); setShowModal(true); }}
-                        className="p-2 text-on-surface-variant hover:bg-surface-container-low rounded-lg transition-all"
-                      >
-                        <MoreHorizontal size={18} />
-                      </button>
+                      <div className="flex justify-end gap-2">
+                        <button 
+                          onClick={() => { setEditingCliente(cliente); setShowModal(true); }}
+                          className="p-2 text-on-surface-variant hover:bg-surface-container-low rounded-lg transition-all"
+                          title="Editar"
+                        >
+                          <MoreHorizontal size={18} />
+                        </button>
+                        <button 
+                          onClick={() => { setClienteToDelete(cliente); setShowDeleteConfirm(true); }}
+                          className="p-2 text-error hover:bg-error/10 rounded-lg transition-all"
+                          title="Excluir"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -308,6 +394,16 @@ export const Clientes = () => {
           onSave={() => { fetchClientes(); setShowModal(false); }} 
         />
       )}
+
+      {/* Confirmation Dialog */}
+      <ConfirmDialog 
+        isOpen={showDeleteConfirm}
+        title="Excluir Cliente?"
+        description={`Tem certeza que deseja excluir ${clienteToDelete?.nome}? Esta ação não pode ser desfeita e removerá todo o histórico se permitido pelo sistema.`}
+        onConfirm={handleDeleteCliente}
+        onCancel={() => { setShowDeleteConfirm(false); setClienteToDelete(null); }}
+        isLoading={isDeleting}
+      />
     </div>
   );
 };
@@ -319,7 +415,8 @@ const ClienteModal = ({ cliente, onClose, onSave }: { cliente: Cliente | null, o
     email: cliente?.email || '',
     telefone: cliente?.telefone || '',
     data_nascimento: cliente?.data_nascimento || '',
-    observacoes: cliente?.observacoes || ''
+    observacoes: cliente?.observacoes || '',
+    status: cliente?.status || 'Novo'
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -332,7 +429,8 @@ const ClienteModal = ({ cliente, onClose, onSave }: { cliente: Cliente | null, o
       email: formData.email || null,
       telefone: formData.telefone || null,
       data_nascimento: formData.data_nascimento || null,
-      observacoes: formData.observacoes || null
+      observacoes: formData.observacoes || null,
+      status: formData.status
     };
 
     try {
@@ -385,14 +483,29 @@ const ClienteModal = ({ cliente, onClose, onSave }: { cliente: Cliente | null, o
               />
             </div>
           </div>
-          <div className="space-y-1">
-            <label className="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Data de Nascimento</label>
-            <input 
-              type="date" 
-              value={formData.data_nascimento}
-              onChange={e => setFormData({...formData, data_nascimento: e.target.value})}
-              className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Status</label>
+              <select 
+                value={formData.status}
+                onChange={e => setFormData({...formData, status: e.target.value as any})}
+                className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 appearance-none cursor-pointer"
+              >
+                <option value="Novo">Novo</option>
+                <option value="Frequente">Frequente</option>
+                <option value="VIP">VIP</option>
+                <option value="Inativo">Inativo</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Data de Nascimento</label>
+              <input 
+                type="date" 
+                value={formData.data_nascimento}
+                onChange={e => setFormData({...formData, data_nascimento: e.target.value})}
+                className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
+              />
+            </div>
           </div>
           <div className="space-y-1">
             <label className="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Observações</label>

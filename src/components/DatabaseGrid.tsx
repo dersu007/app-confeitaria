@@ -8,11 +8,12 @@ import {
 } from '@tanstack/react-table';
 import { dataService } from '../services/dataService';
 import { useAuth } from '../lib/auth';
-import { Plus, Trash2, Save, RefreshCw, Search, ClipboardPaste } from 'lucide-react';
+import { Plus, Trash2, Save, RefreshCw, Search, ClipboardPaste, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { 
   calculateIngredientUnitPrice
 } from '../services/bakeryService';
+import { ConfirmDialog } from './ui/ConfirmDialog';
 
 /*
   SQL PARA SUPABASE (RLS POLICIES):
@@ -44,6 +45,12 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
   const [loading, setLoading] = useState(true);
   const [savingRows, setSavingRows] = useState<Set<string>>(new Set());
   const [isRecalculating, setIsRecalculating] = useState(false);
+  
+  // States for Deletion Flow
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showSecondaryConfirm, setShowSecondaryConfirm] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState<any>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const fetchData = async () => {
     setLoading(true);
@@ -74,7 +81,8 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
       'margem_percentual', 'custo_total_calculado', 'quantidade',
       'margem_padrao', 'valor_mensal', 'custo_embalagem', 
       'taxa_venda_percentual', 'imposto_percentual',
-      'custo_hora_trabalho', 'custo_fixo_rateado', 'custo_total', 'custo_unitario'
+      'custo_hora_trabalho', 'custo_fixo_rateado', 'custo_total', 'custo_unitario',
+      'estoque_minimo', 'estoque_atual'
     ];
 
     const booleanFields = ['usar_margem_categoria', 'usar_preco_manual'];
@@ -167,7 +175,7 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
   const getAllowedColumns = (tableName: string): string[] => {
     switch (tableName) {
       case 'ingredientes':
-        return ['nome', 'descricao', 'fornecedor', 'unidade_embalagem', 'peso_embalagem', 'preco_embalagem', 'preco_por_unidade_base', 'user_id'];
+        return ['nome', 'descricao', 'fornecedor', 'unidade_embalagem', 'peso_embalagem', 'preco_embalagem', 'preco_por_unidade_base', 'estoque_minimo', 'estoque_atual', 'user_id'];
       case 'produtos':
         return [
           'nome', 'descricao', 'categoria_id', 'rendimento_unidades', 
@@ -203,7 +211,7 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
     // Valores padrão por tabela
     switch (table) {
       case 'ingredientes':
-        rawNewRow = { ...rawNewRow, nome: 'Novo Ingrediente', unidade_embalagem: 'g', peso_embalagem: 1000, preco_embalagem: 0, preco_por_unidade_base: 0 };
+        rawNewRow = { ...rawNewRow, nome: 'Novo Ingrediente', unidade_embalagem: 'g', peso_embalagem: 1000, preco_embalagem: 0, preco_por_unidade_base: 0, estoque_minimo: 0, estoque_atual: 0 };
         break;
       case 'produtos':
         rawNewRow = { ...rawNewRow, nome: 'Novo Produto', rendimento_unidades: 1, tempo_producao: 0, usar_margem_categoria: true, margem_percentual: 30, margem_tipo: 'markup' };
@@ -244,31 +252,56 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
     }
   };
 
-  const deleteRow = async (id: string) => {
+  const deleteRow = async () => {
+    if (!itemToDelete) return;
+    
+    setIsDeleting(true);
     try {
-      await dataService.deleteEntity(table, id);
-      setData(old => old.filter(row => row.id !== id));
-      toast.success('Deletado');
+      await dataService.deleteEntity(table, itemToDelete.id);
+      setData(old => old.filter(row => row.id !== itemToDelete.id));
+      toast.success('Excluído com sucesso');
       if (onDataChange) onDataChange();
+      
+      // Close all modals
+      setShowDeleteConfirm(false);
+      setShowSecondaryConfirm(false);
+      setItemToDelete(null);
     } catch (err: any) {
       console.error('Erro ao deletar:', err);
       if (err.code === '23503') {
-        toast.error('Não é possível excluir: este item está sendo usado em um produto ou ficha técnica.');
+        if (table === 'categorias') {
+          toast.error('Não é possível excluir: esta categoria está sendo usada em um ou mais produtos.');
+        } else if (table === 'ingredientes') {
+          toast.error('Não é possível excluir: este insumo está sendo usado em uma ficha técnica.');
+        } else {
+          toast.error('Não é possível excluir: este item possui vínculos ativos.');
+        }
       } else {
-        toast.error(`Erro no Banco (${err.code || '?'}): ${err.message}`);
+        toast.error(`Erro: ${err.message}`);
       }
+      // Keep modal open to show error, or close it? 
+      // Usually better to close so user can resolve the dependency issue.
+      setShowDeleteConfirm(false);
+      setShowSecondaryConfirm(false);
+    } finally {
+      setIsDeleting(false);
     }
+  };
+
+  const handleStartDelete = (row: any) => {
+    setItemToDelete(row);
+    setShowDeleteConfirm(true);
   };
 
   const handleRecalculateAll = async () => {
     if (isRecalculating) return;
     
     setIsRecalculating(true);
-    const loadingToast = toast.loading('Recalculando todos os produtos...');
+    const loadingToast = toast.loading('Recalculando toda a base (Produtos e Pedidos)...');
     try {
-      await dataService.recalculateAllProducts();
+      await dataService.recalculateEverything();
       await fetchData();
-      toast.success('Todos os produtos foram recalculados!', { id: loadingToast });
+      toast.success('Base de dados totalmente sincronizada!', { id: loadingToast });
       if (onDataChange) onDataChange();
     } catch (err: any) {
       console.error('Erro no recálculo global:', err);
@@ -446,7 +479,7 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
         header: '',
         cell: ({ row }: any) => (
           <button 
-            onClick={() => deleteRow(row.original.id)}
+            onClick={() => handleStartDelete(row.original)}
             className="p-1 text-on-surface-variant hover:text-error transition-colors"
           >
             <Trash2 size={16} />
@@ -569,6 +602,36 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
       <div className="p-3 bg-surface-container-low/30 border-t border-surface-container-high text-[10px] text-on-surface-variant italic">
         Dica: Você pode copiar dados do Excel/Google Sheets e colar (Ctrl+V) aqui para cadastrar vários itens de uma vez.
       </div>
+
+      {/* Primary Delete Confirmation */}
+      <ConfirmDialog 
+        isOpen={showDeleteConfirm}
+        title={table === 'categorias' ? "Confirmar Exclusão de Categoria?" : "Excluir Registro?"}
+        description={`Tem certeza que deseja excluir "${itemToDelete?.nome || itemToDelete?.descricao || 'este item'}"?`}
+        confirmLabel={table === 'categorias' ? "Continuar" : "Excluir"}
+        onConfirm={() => {
+          if (table === 'categorias') {
+            setShowDeleteConfirm(false);
+            setTimeout(() => setShowSecondaryConfirm(true), 300); // Small delay for animation
+          } else {
+            deleteRow();
+          }
+        }}
+        onCancel={() => { setShowDeleteConfirm(false); setItemToDelete(null); }}
+        variant="warning"
+      />
+
+      {/* Secondary Double Confirmation (Specific for Categories) */}
+      <ConfirmDialog 
+        isOpen={showSecondaryConfirm}
+        title="DUPLA CONFIRMAÇÃO"
+        description="Atenção: Excluir uma categoria pode impactar a organização de seus produtos. Tem certeza ABSOLUTA que deseja prosseguir?"
+        confirmLabel="Sim, Excluir Definitivamente"
+        onConfirm={deleteRow}
+        onCancel={() => { setShowSecondaryConfirm(false); setItemToDelete(null); }}
+        isLoading={isDeleting}
+        variant="danger"
+      />
     </div>
   );
 };

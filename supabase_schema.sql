@@ -32,7 +32,7 @@ CREATE TABLE produtos (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
   nome TEXT NOT NULL,
-  categoria_id UUID REFERENCES categorias(id),
+  categoria_id UUID REFERENCES categorias(id) ON DELETE SET NULL,
   rendimento_unidades NUMERIC DEFAULT 1,
   peso_final_produto NUMERIC DEFAULT 0,
   custo_total_calculado NUMERIC DEFAULT 0,
@@ -49,6 +49,33 @@ CREATE TABLE produtos (
   modo_preparo TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- SCRIPT DE AJUSTE DE CONSTRANGIMENTOS (Pode ser rodado no SQL Editor)
+-- 1. Garantir que na tabela de produtos a exclusão seja permitida (SET NULL)
+-- DO $$
+-- DECLARE
+--     r record;
+-- BEGIN
+--     FOR r IN (
+--         SELECT constraint_name 
+--         FROM information_schema.key_column_usage 
+--         WHERE table_name = 'produtos' 
+--         AND column_name = 'categoria_id'
+--         AND constraint_name LIKE '%fkey%'
+--     ) LOOP
+--         EXECUTE 'ALTER TABLE produtos DROP CONSTRAINT ' || quote_ident(r.constraint_name);
+--     END LOOP;
+-- END $$;
+-- ALTER TABLE produtos ADD CONSTRAINT produtos_categoria_id_fkey FOREIGN KEY (categoria_id) REFERENCES categorias(id) ON DELETE SET NULL;
+
+-- 2. Remover qualquer vínculo de categorias na tabela de ingredientes (insumos)
+-- DO $$ 
+-- BEGIN 
+--     IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ingredientes' AND column_name='categoria_id') THEN
+--         ALTER TABLE ingredientes DROP COLUMN categoria_id;
+--     END IF;
+-- END $$;
+
 
 -- Produto_Ingredientes
 CREATE TABLE produto_ingredientes (
