@@ -210,11 +210,16 @@ export const Produtos = () => {
 
   const handleArchiveProduct = async (e: React.MouseEvent, product: Produto) => {
     e.stopPropagation();
-    const newStatus = !product.ativo;
-    const loadingToast = toast.loading(`${newStatus ? 'Ativando' : 'Arquivando'} produto...`);
+    const isCurrentlyActive = product.ativo !== false;
+    const newStatus = !isCurrentlyActive;
+    
+    const actionLabel = newStatus ? 'Restaurando' : 'Arquivando';
+    const successLabel = newStatus ? 'restaurado' : 'arquivado';
+    
+    const loadingToast = toast.loading(`${actionLabel} produto...`);
     try {
       await dataService.saveProduto({ ...product, ativo: newStatus });
-      toast.success(`Produto ${newStatus ? 'ativado' : 'arquivado'} com sucesso!`, { id: loadingToast });
+      toast.success(`Produto ${successLabel} com sucesso!`, { id: loadingToast });
       await fetchData();
     } catch (error) {
       console.error('Erro ao alternar status do produto:', error);
@@ -373,7 +378,7 @@ export const Produtos = () => {
                 <div 
                   key={produto.id} 
                   onClick={() => handleProductClick(produto)}
-                  className={`bg-white rounded-2xl shadow-sm border border-surface-container-high hover:shadow-md transition-all group cursor-pointer overflow-hidden flex flex-col ${produto.ativo === false ? 'opacity-50 grayscale-[0.5]' : ''}`}
+                  className={`bg-white rounded-2xl shadow-sm border border-surface-container-high hover:shadow-md transition-all group cursor-pointer overflow-hidden flex flex-col ${produto.ativo === false ? 'opacity-60 grayscale-[0.5]' : ''}`}
                 >
                   <div className="aspect-video bg-surface-container-low relative overflow-hidden">
                     <img 
@@ -407,7 +412,7 @@ export const Produtos = () => {
                       </div>
                       <button 
                         onClick={(e) => handleArchiveProduct(e, produto)}
-                        className={`p-2 rounded-lg shadow-lg transition-all flex items-center justify-center border border-white/20 ${produto.ativo === false ? 'bg-amber-500 text-white' : 'bg-white text-on-surface-variant hover:text-primary'}`}
+                        className={`p-2 rounded-lg shadow-lg transition-all flex items-center justify-center border border-white/20 ${produto.ativo === false ? 'bg-amber-500 text-white opacity-100 grayscale-0' : 'bg-white text-on-surface-variant hover:text-primary'}`}
                         title={produto.ativo === false ? 'Restaurar Produto' : 'Arquivar Produto'}
                       >
                         {produto.ativo === false ? <ArchiveRestore size={14} /> : <Archive size={14} />}
@@ -480,7 +485,7 @@ export const Produtos = () => {
                         <tr 
                           key={produto.id} 
                           onClick={() => handleProductClick(produto)}
-                          className={`hover:bg-surface-container-low/30 transition-colors group cursor-pointer ${validateProductIntegrity(produto).length > 0 ? 'bg-error/5' : ''} ${produto.ativo === false ? 'opacity-50' : ''}`}
+                          className={`hover:bg-surface-container-low/30 transition-colors group cursor-pointer ${validateProductIntegrity(produto).length > 0 ? 'bg-error/5' : ''} ${produto.ativo === false ? 'opacity-60 bg-surface-container-highest/10' : ''}`}
                         >
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-4">
