@@ -1,6 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { dataService } from '../../services/dataService';
-import { Cliente, Produto, Pedido, PedidoItem, PedidoExtra, CategoriaExtra } from '../../types';
+import React, { useState } from 'react';
+import { Produto, Pedido, PedidoItem, PedidoExtra } from '../../types';
 import { 
   X, 
   Plus, 
@@ -10,13 +9,13 @@ import {
   DollarSign, 
   Tag, 
   Info,
-  ChevronDown,
   PlusCircle,
   Calendar,
-  Clock
+  Loader2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { formatCurrency, calculateUnitCost } from '../../services/bakeryService';
+import { useClientes, useProdutos, useCategoriasExtras, useSaveOrder } from '../../hooks/useQueries';
 
 interface OrderModalProps {
   pedido?: Pedido | null;
@@ -25,9 +24,9 @@ interface OrderModalProps {
 }
 
 export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
-  const [clientes, setClientes] = useState<Cliente[]>([]);
-  const [produtos, setProdutos] = useState<Produto[]>([]);
-  const [extraCategories, setExtraCategories] = useState<CategoriaExtra[]>([]);
+  const { data: clientes = [], isLoading: loadingCli } = useClientes();
+  const { data: produtos = [], isLoading: loadingProd } = useProdutos();
+  const { data: extraCategories = [], isLoading: loadingExtraCat } = useCategoriasExtras();
   
   const [clienteId, setClienteId] = useState(pedido?.cliente_id || '');
   const [dataPedido, setDataPedido] = useState(() => {
@@ -37,8 +36,8 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
       return new Date().toISOString().split('T')[0];
     }
   });
-  const [status, setStatus] = useState(pedido?.status || 'Em preparação');
-  const [prioridade, setPrioridade] = useState(pedido?.prioridade || 'Padrão');
+  const [status, setStatus] = useState<Pedido['status']>(pedido?.status || 'Em preparação');
+  const [prioridade, setPrioridade] = useState<Pedido['prioridade']>(pedido?.prioridade || 'Padrão');
   const [observacoes, setObservacoes] = useState(pedido?.observacoes || '');
   const [dataEntrega, setDataEntrega] = useState(() => {
     try {
@@ -47,7 +46,6 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
       return '';
     }
   });
-  const [tempoEstimado, setTempoEstimado] = useState(pedido?.tempo_estimado || '');
 
   const [itens, setItens] = useState<Partial<PedidoItem>[]>(pedido?.itens || []);
   const [extras, setExtras] = useState<Partial<PedidoExtra>[]>(pedido?.extras || []);
@@ -55,29 +53,12 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
   const [productSearch, setProductSearch] = useState('');
   const [showProductResults, setShowProductResults] = useState(false);
 
-  useEffect(() => {
-    fetchInitialData();
-  }, []);
+  const saveOrderMutation = useSaveOrder();
 
-  const fetchInitialData = async () => {
-    try {
-      const [clientsData, productsData, extrasCatsData] = await Promise.all([
-        dataService.getClientes(),
-        dataService.getProdutos(),
-        dataService.getCategoriasExtras()
-      ]);
-
-      setClientes(clientsData);
-      setProdutos(productsData);
-      setExtraCategories(extrasCatsData);
-    } catch (error) {
-      console.error('Error fetching initial order data:', error);
-      toast.error('Erro ao carregar dados iniciais');
-    }
-  };
+  const loadingInitial = loadingCli || loadingProd || loadingExtraCat;
 
   const addItem = (produto: Produto) => {
-    const unitCost = calculateUnitCost(produto.custo_total_calculado, produto.rendimento_unidades);
+    const unitCost = calculateUnitCost(produto.custo_total, produto.rendimento_unidades);
     const newItem: Partial<PedidoItem> = {
       produto_id: produto.id,
       quantidade: 1,
@@ -109,7 +90,7 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
     setExtras([...extras, { descricao: '', categoria: '', valor: 0 }]);
   };
 
-  const updateExtra = (index: number, field: keyof PedidoExtra, value: any) => {
+  const updateExtra = <K extends keyof PedidoExtra>(index: number, field: K, value: PedidoExtra[K]) => {
     const newExtras = [...extras];
     newExtras[index] = { ...newExtras[index], [field]: value };
     setExtras(newExtras);
@@ -139,66 +120,50 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
         return;
       }
 
-    const loadingToast = toast.loading('Salvando pedido...');
+    const orderData = {
+      id: pedido?.id,
+      cliente_id: clienteId,
+      data_pedido: new Date(dataPedido).toISOString(),
+      status,
+      prioridade,
+      observacoes,
+      data_entrega: new Date(dataEntrega).toISOString(),
+      valor_total: valorTotal,
+      itens: itens.map(item => ({
+        produto_id: item.produto_id!,
+        quantidade: item.quantidade!,
+        preco_unitario: item.preco_unitario!,
+        custo_unitario: item.custo_unitario!,
+        subtotal: item.subtotal!
+      })),
+      extras: extras.map(extra => ({
+        descricao: extra.descricao!,
+        categoria: extra.categoria!,
+        valor: extra.valor!
+      }))
+    };
 
-    try {
-      const pedidoData = {
-        id: pedido?.id,
-        cliente_id: clienteId,
-        data_pedido: new Date(dataPedido).toISOString(),
-        status,
-        prioridade,
-        observacoes,
-        data_entrega: new Date(dataEntrega).toISOString(),
-        tempo_estimado: tempoEstimado,
-        valor_total: valorTotal
-      };
-
-      const savedPedido = await dataService.savePedido(pedidoData);
-      const pedidoId = savedPedido.id;
-
-      if (pedido?.id) {
-        // Clear existing items and extras for update
-        await Promise.all([
-          dataService.deletePedidoItens(pedidoId),
-          dataService.deletePedidoExtras(pedidoId)
-        ]);
+    saveOrderMutation.mutate(orderData, {
+      onSuccess: () => {
+        onSave();
       }
-
-      // Insert items
-      const itemsToInsert = itens.map(item => ({
-        pedido_id: pedidoId,
-        produto_id: item.produto_id,
-        quantidade: item.quantidade,
-        preco_unitario: item.preco_unitario,
-        custo_unitario: item.custo_unitario,
-        subtotal: item.subtotal
-      }));
-
-      await dataService.savePedidoItens(itemsToInsert);
-
-      // Insert extras
-      if (extras.length > 0) {
-        const extrasToInsert = extras.map(extra => ({
-          pedido_id: pedidoId,
-          descricao: extra.descricao,
-          categoria: extra.categoria,
-          valor: extra.valor
-        }));
-        await dataService.savePedidoExtras(extrasToInsert);
-      }
-
-      toast.success('Pedido salvo com sucesso!', { id: loadingToast });
-      onSave();
-    } catch (error: any) {
-      console.error('Erro ao salvar pedido:', error);
-      toast.error(`Erro ao salvar: ${error.message}`, { id: loadingToast });
-    }
+    });
   };
 
   const filteredProducts = produtos.filter(p => 
     p.ativo !== false && p.nome.toLowerCase().includes(productSearch.toLowerCase())
   );
+
+  if (loadingInitial) {
+    return (
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="bg-surface-container-lowest p-8 rounded-3xl flex flex-col items-center gap-4">
+          <Loader2 size={48} className="animate-spin text-primary" />
+          <p className="text-sm font-bold text-on-surface">Carregando dados...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -261,7 +226,7 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
               </label>
               <select 
                 value={status}
-                onChange={e => setStatus(e.target.value as any)}
+                onChange={e => setStatus(e.target.value as Pedido['status'])}
                 className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
               >
                 <option value="Em preparação">Em preparação</option>
@@ -277,7 +242,7 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
               </label>
               <select 
                 value={prioridade}
-                onChange={e => setPrioridade(e.target.value as any)}
+                onChange={e => setPrioridade(e.target.value as Pedido['prioridade'])}
                 className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
               >
                 <option value="Baixa">Baixa</option>

@@ -1,15 +1,13 @@
 import React from 'react';
-import { Pedido, PedidoItem, PedidoExtra } from '../../types';
+import { Pedido } from '../../types';
 import { 
   X, 
   Package, 
   DollarSign, 
   Calendar, 
   Clock, 
-  Tag, 
   Info,
   TrendingUp,
-  ChevronRight,
   User,
   ShoppingBag,
   Trash2,
@@ -39,7 +37,7 @@ export const OrderDetails = ({ pedido, onClose, onEdit, onDelete }: OrderDetails
       toast.success('Pedido excluído com sucesso');
       onDelete?.();
       onClose();
-    } catch (error) {
+    } catch {
       toast.error('Erro ao excluir pedido');
     } finally {
       setIsDeleting(false);
@@ -143,9 +141,6 @@ export const OrderDetails = ({ pedido, onClose, onEdit, onDelete }: OrderDetails
                 <Calendar size={12} className="text-primary" />
                 Entrega: {format(parseISO(pedido.data_entrega), "dd/MM/yyyy")}
               </p>
-              {pedido.tempo_estimado && (
-                <p className="text-[10px] text-on-surface-variant mt-1 italic">Obs: {pedido.tempo_estimado}</p>
-              )}
             </div>
             <div className="bg-primary/5 p-5 rounded-3xl border border-primary/10">
               <p className="text-[10px] font-bold text-primary uppercase tracking-widest mb-1 flex items-center gap-1.5">

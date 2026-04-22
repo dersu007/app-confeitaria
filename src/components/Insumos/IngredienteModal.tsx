@@ -2,7 +2,7 @@ import React from 'react';
 import { useForm, SubmitHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { X, Save, AlertTriangle, Loader2 } from 'lucide-react';
+import { X, Save, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { dataService } from '../../services/dataService';
 import { Ingrediente } from '../../types';
@@ -12,10 +12,11 @@ const ingredienteSchema = z.object({
   unidade_embalagem: z.enum(['g', 'kg', 'ml', 'l', 'un']),
   peso_embalagem: z.coerce.number().min(0.001, 'A quantidade da embalagem deve ser maior que zero'),
   preco_embalagem: z.coerce.number().min(0, 'O preço deve ser positivo'),
-  estoque_minimo: z.coerce.number().min(0, 'O estoque mínimo deve ser positivo'),
+  estoque_minimo_unidades: z.coerce.number().min(0, 'O estoque mínimo deve ser positivo'),
   estoque_atual: z.coerce.number().min(0, 'O estoque atual deve ser positivo'),
   fornecedor: z.string().optional().nullable(),
-  descricao: z.string().optional().nullable()
+  descricao: z.string().optional().nullable(),
+  categoria_id: z.string().optional().nullable()
 });
 
 type IngredienteFormData = z.infer<typeof ingredienteSchema>;
@@ -33,22 +34,39 @@ export const IngredienteModal = ({ ingrediente, onClose, onSave }: IngredienteMo
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors },
   } = useForm<IngredienteFormData>({
-    resolver: zodResolver(ingredienteSchema) as any,
+    resolver: zodResolver(ingredienteSchema),
     defaultValues: {
       nome: ingrediente?.nome || '',
-      unidade_embalagem: (ingrediente?.unidade_embalagem as any) || 'g',
+      unidade_embalagem: ingrediente?.unidade_embalagem || 'g',
       peso_embalagem: ingrediente?.peso_embalagem || 1000,
       preco_embalagem: ingrediente?.preco_embalagem || 0,
-      estoque_minimo: ingrediente?.estoque_minimo || 0,
+      estoque_minimo_unidades: ingrediente?.estoque_minimo_unidades || 0,
       estoque_atual: ingrediente?.estoque_atual || 0,
       fornecedor: ingrediente?.fornecedor || '',
-      descricao: ingrediente?.descricao || ''
+      descricao: ingrediente?.descricao || '',
+      categoria_id: ingrediente?.categoria_id || ''
     },
   });
 
+  const pesoEmbalagem = watch('peso_embalagem');
+  const minUnidades = watch('estoque_minimo_unidades');
+  const unidadeEmbalagem = watch('unidade_embalagem');
+
+  // Validação: Se unidades > 0, o peso da embalagem DEVE ser maior que 0
+  const isStaleMinStock = Number(minUnidades) > 0 && (!pesoEmbalagem || Number(pesoEmbalagem) <= 0);
+
+  // Cálculo do estoque mínimo absoluto
+  const calculatedMinTotal = (Number(pesoEmbalagem) || 0) * (Number(minUnidades) || 0);
+
   const onSubmit: SubmitHandler<IngredienteFormData> = async (formData) => {
+    if (!formData.peso_embalagem || formData.peso_embalagem <= 0) {
+      toast.error('Defina o conteúdo da embalagem para calcular o estoque mínimo');
+      return;
+    }
+
     setIsSubmitting(true);
     const loadingToast = toast.loading(isEditing ? 'Atualizando insumo...' : 'Cadastrando insumo...');
     
@@ -61,22 +79,25 @@ export const IngredienteModal = ({ ingrediente, onClose, onSave }: IngredienteMo
         ...ingrediente,
         nome: formData.nome,
         unidade_embalagem: formData.unidade_embalagem,
-        unidade_base: mappedUnidadeBase as any,
+        unidade_base: mappedUnidadeBase as Ingrediente['unidade_base'],
         peso_embalagem: formData.peso_embalagem,
         preco_embalagem: formData.preco_embalagem,
-        estoque_minimo: formData.estoque_minimo,
+        estoque_minimo_unidades: formData.estoque_minimo_unidades,
+        estoque_minimo: formData.estoque_minimo_unidades * formData.peso_embalagem,
         estoque_atual: formData.estoque_atual,
         fornecedor: formData.fornecedor || null,
         descricao: formData.descricao || null,
+        categoria_id: formData.categoria_id || null,
       };
 
       await dataService.saveIngrediente(payload);
       
       toast.success(isEditing ? 'Insumo atualizado!' : 'Insumo cadastrado!', { id: loadingToast });
       onSave();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Erro ao salvar insumo:', error);
-      toast.error(`Erro ao salvar: ${error.message}`, { id: loadingToast });
+      const message = error instanceof Error ? error.message : 'Erro desconhecido';
+      toast.error(`Erro ao salvar: ${message}`, { id: loadingToast });
     } finally {
       setIsSubmitting(false);
     }
@@ -199,19 +220,29 @@ export const IngredienteModal = ({ ingrediente, onClose, onSave }: IngredienteMo
               {/* Estoque Mínimo */}
               <div>
                 <label className="text-[10px] uppercase font-bold text-on-surface-variant block mb-1 ml-1">
-                  Estoque Mínimo (Alerta)
+                  Estoque Mínimo (em Embalagens/Unidades)
                 </label>
                 <input
                   type="number"
-                  step="any"
-                  {...register('estoque_minimo')}
-                  className={`w-full px-4 py-3 rounded-xl border ${errors.estoque_minimo ? 'border-error ring-1 ring-error' : 'border-surface-container-high'} bg-surface-container-low focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm`}
+                  min="0"
+                  step="0.1"
+                  {...register('estoque_minimo_unidades')}
+                  className={`w-full px-4 py-3 rounded-xl border ${errors.estoque_minimo_unidades ? 'border-error ring-1 ring-error' : 'border-surface-container-high'} bg-surface-container-low focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm`}
                 />
-                {errors.estoque_minimo && (
+                {errors.estoque_minimo_unidades && (
                   <span className="text-[10px] text-error font-bold mt-1 ml-1 block">
-                    {errors.estoque_minimo.message}
+                    {errors.estoque_minimo_unidades.message}
                   </span>
                 )}
+                {isStaleMinStock ? (
+                  <p className="text-[9px] text-error font-bold mt-1 ml-1 animate-pulse">
+                    ⚠️ Preencha o peso da embalagem para calcular o estoque mínimo.
+                  </p>
+                ) : Number(pesoEmbalagem) > 0 && Number(minUnidades) > 0 ? (
+                  <p className="text-[9px] text-primary font-bold mt-1 ml-1 italic animate-in fade-in slide-in-from-top-1">
+                    Equivale a: {calculatedMinTotal.toFixed(2)} {unidadeEmbalagem}.
+                  </p>
+                ) : null}
               </div>
             </div>
 
@@ -239,8 +270,8 @@ export const IngredienteModal = ({ ingrediente, onClose, onSave }: IngredienteMo
             </button>
             <button
               type="submit"
-              disabled={isSubmitting}
-              className="flex-3 bg-primary text-white px-8 py-3 rounded-xl font-bold text-sm shadow-lg shadow-primary/20 hover:bg-primary/90 flex items-center justify-center gap-2 disabled:opacity-50 transition-all"
+              disabled={isSubmitting || isStaleMinStock}
+              className="flex-3 bg-primary text-white px-8 py-3 rounded-xl font-bold text-sm shadow-lg shadow-primary/20 hover:bg-primary/90 flex items-center justify-center gap-2 disabled:opacity-50 transition-all cursor-pointer disabled:cursor-not-allowed"
             >
               {isSubmitting ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
               {isEditing ? 'Salvar Alterações' : 'Cadastrar Insumo'}

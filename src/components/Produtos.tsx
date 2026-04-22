@@ -1,23 +1,27 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { dataService } from '../services/dataService';
+import { 
+  useProdutos, 
+  useCategorias, 
+  useSaveProduto, 
+  useDeleteProduto, 
+  useDuplicateProduto 
+} from '../hooks/useQueries';
 import { 
   Plus, 
   Search, 
   Package, 
   Trash2, 
   Edit2, 
-  ChevronRight, 
   Clock, 
   TrendingUp, 
   TrendingDown, 
   Calculator, 
   ArrowLeft,
-  PieChart,
   FileText,
   Download,
   Settings,
-  X,
   BookOpen,
   Loader2,
   Copy,
@@ -28,8 +32,8 @@ import {
   ArchiveRestore
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { Produto, Categoria, ProdutoIngrediente } from '../types';
-import { formatCurrency, calculateUnitCost, calculateProductPricing, validateProductIntegrity } from '../services/bakeryService';
+import { Produto, ProdutoIngrediente } from '../types';
+import { formatCurrency, validateProductIntegrity } from '../services/bakeryService';
 import { PieChart as RePieChart, Pie, Cell, ResponsiveContainer, Tooltip as ReTooltip } from 'recharts';
 import { ProductModal } from './Produtos/ProductModal';
 import { DEFAULT_PRODUCT_IMAGE } from '../constants';
@@ -38,9 +42,14 @@ import { exportToCSV } from '../utils/csvUtils';
 
 export const Produtos = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [produtos, setProdutos] = useState<Produto[]>([]);
-  const [categorias, setCategorias] = useState<Categoria[]>([]);
-  const [loading, setLoading] = useState(true);
+  
+  // React Query Hooks
+  const { data: produtosData = [], isLoading: loadingProdutos, refetch: refetchProdutos } = useProdutos();
+  const { data: categoriasData = [], isLoading: loadingCategorias } = useCategorias();
+  const deleteProdutoMutation = useDeleteProduto();
+  const duplicateProdutoMutation = useDuplicateProduto();
+  const saveProdutoMutation = useSaveProduto();
+
   const [searchTerm, setSearchTerm] = useState('');
   const [showCriticalOnly, setShowCriticalOnly] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Produto | null>(null);
@@ -48,7 +57,6 @@ export const Produtos = () => {
   const [productIngredients, setProductIngredients] = useState<ProdutoIngrediente[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [productToEdit, setProductToEdit] = useState<Produto | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [productToDelete, setProductToDelete] = useState<Produto | null>(null);
   const [isExporting, setIsExporting] = useState(false);
@@ -56,28 +64,28 @@ export const Produtos = () => {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [viewStatus, setViewStatus] = useState<'ativos' | 'arquivados'>('ativos');
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+  const loading = loadingProdutos || loadingCategorias;
+  const produtos = produtosData;
+  const categorias = categoriasData;
 
-  // Handle URL edit parameter
-  useEffect(() => {
+  // Handle URL edit parameter (Syncing once data is loaded)
+  React.useEffect(() => {
     if (produtos.length > 0) {
       const editId = searchParams.get('edit');
       if (editId) {
         const product = produtos.find(p => p.id === editId);
         if (product) {
-          setProductToEdit(product);
-          setShowModal(true);
-          // Sync URL: instead of deleting, just ensure we don't loop
-          // Actually, removing it is cleaner for the user
-          const nextParams = new URLSearchParams(searchParams);
-          nextParams.delete('edit');
-          setSearchParams(nextParams, { replace: true });
+          Promise.resolve().then(() => {
+            setProductToEdit(product);
+            setShowModal(true);
+            const nextParams = new URLSearchParams(searchParams);
+            nextParams.delete('edit');
+            setSearchParams(nextParams, { replace: true });
+          });
         }
       }
     }
-  }, [produtos, searchParams]);
+  }, [produtos, searchParams, setSearchParams]);
 
   const handleExportCSV = () => {
     setIsExporting(true);
@@ -120,28 +128,10 @@ export const Produtos = () => {
         'produtos_detalhado'
       );
       if (success) toast.success('Relatório detalhado de produtos exportado!');
-    } catch (error) {
+    } catch {
       toast.error('Erro ao exportar CSV');
     } finally {
       setIsExporting(false);
-    }
-  };
-
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const [prodRes, catRes] = await Promise.all([
-        dataService.getProdutos(),
-        dataService.getCategorias()
-      ]);
-      
-      setProdutos(prodRes);
-      setCategorias(catRes);
-    } catch (error) {
-      toast.error('Erro ao carregar dados');
-      console.error(error);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -175,37 +165,37 @@ export const Produtos = () => {
   const handleDuplicateProduct = async (e: React.MouseEvent, product: Produto) => {
     e.stopPropagation();
     const loadingToast = toast.loading('Duplicando produto...');
-    try {
-      const duplicated = await dataService.duplicateProduct(product.id);
-      toast.success('Produto duplicado com sucesso!', { id: loadingToast });
-      await fetchData();
-      
-      // Open the modal with the new product for further edits if desired
-      setProductToEdit(duplicated);
-      setShowModal(true);
-    } catch (error) {
-      console.error('Erro ao duplicar produto:', error);
-      toast.error('Ocorreu um erro ao duplicar o produto.', { id: loadingToast });
-    }
+    duplicateProdutoMutation.mutate(product.id, {
+      onSuccess: (duplicated) => {
+        toast.dismiss(loadingToast);
+        // Open the modal with the new product for further edits if desired
+        setProductToEdit(duplicated);
+        setShowModal(true);
+      },
+      onError: (error) => {
+        console.error('Erro ao duplicar produto:', error);
+        toast.error('Ocorreu um erro ao duplicar o produto.', { id: loadingToast });
+      }
+    });
   };
 
   const handleDeleteProduct = async () => {
     if (!productToDelete) return;
 
-    setIsDeleting(true);
-    try {
-      await dataService.deleteProduto(productToDelete.id);
-      toast.success('Produto excluído com sucesso');
-      setShowDetail(false);
-      setShowDeleteConfirm(false);
-      fetchData();
-    } catch (error: any) {
-      console.error('Erro ao excluir produto:', error);
-      toast.error(error.message || 'Erro ao excluir o produto. Verifique se ele está vinculado a pedidos.');
-    } finally {
-      setIsDeleting(false);
-      setProductToDelete(null);
-    }
+    deleteProdutoMutation.mutate(productToDelete.id, {
+      onSuccess: () => {
+        toast.success('Produto excluído com sucesso');
+        setShowDetail(false);
+        setShowDeleteConfirm(false);
+        setProductToDelete(null);
+      },
+      onError: (error: unknown) => {
+        console.error('Erro ao excluir produto:', error);
+        const message = error instanceof Error ? error.message : 'Erro ao excluir o produto. Verifique se ele está vinculado a pedidos.';
+        toast.error(message);
+        setProductToDelete(null);
+      }
+    });
   };
 
   const handleArchiveProduct = async (e: React.MouseEvent, product: Produto) => {
@@ -217,14 +207,15 @@ export const Produtos = () => {
     const successLabel = newStatus ? 'restaurado' : 'arquivado';
     
     const loadingToast = toast.loading(`${actionLabel} produto...`);
-    try {
-      await dataService.saveProduto({ ...product, ativo: newStatus });
-      toast.success(`Produto ${successLabel} com sucesso!`, { id: loadingToast });
-      await fetchData();
-    } catch (error) {
-      console.error('Erro ao alternar status do produto:', error);
-      toast.error('Erro ao atualizar status do produto.', { id: loadingToast });
-    }
+    saveProdutoMutation.mutate({ ...product, ativo: newStatus }, {
+      onSuccess: () => {
+        toast.success(`Produto ${successLabel} com sucesso!`, { id: loadingToast });
+      },
+      onError: (error) => {
+        console.error('Erro ao alternar status do produto:', error);
+        toast.error('Erro ao atualizar status do produto.', { id: loadingToast });
+      }
+    });
   };
 
   const filteredProdutos = useMemo(() => {
@@ -265,9 +256,11 @@ export const Produtos = () => {
           }}
           onDuplicate={(e, product) => handleDuplicateProduct(e, product)}
           onRefresh={async () => {
-            const data = await dataService.getProdutoById(selectedProduct.id);
-            setSelectedProduct(data);
-            await fetchData();
+            if (selectedProduct) {
+              const data = await dataService.getProdutoById(selectedProduct.id);
+              setSelectedProduct(data);
+              refetchProdutos();
+            }
           }}
         />
       ) : (
@@ -613,14 +606,14 @@ export const Produtos = () => {
         <ProductModal 
           produto={productToEdit}
           onClose={() => setShowModal(false)}
-          onDelete={async (id) => {
+          onDelete={async () => {
             setProductToDelete(productToEdit);
             setShowDeleteConfirm(true);
             setShowModal(false);
           }}
           onSave={async () => {
             setShowModal(false);
-            await fetchData();
+            refetchProdutos();
             
             // Explicitly fetch the updated product to ensure UI is in sync
             if (selectedProduct?.id) {
@@ -641,7 +634,7 @@ export const Produtos = () => {
         description={`Você tem certeza que deseja excluir "${productToDelete?.nome}"? Isso removerá a ficha técnica permanentemente.`}
         onConfirm={handleDeleteProduct}
         onCancel={() => { setShowDeleteConfirm(false); setProductToDelete(null); }}
-        isLoading={isDeleting}
+        isLoading={deleteProdutoMutation.isPending}
       />
     </div>
   );
@@ -675,7 +668,7 @@ const ProductDetail = ({
       await dataService.saveProduto({ ...product, imagem_url: null });
       toast.success('Imagem removida', { id: loadingToast });
       await onRefresh();
-    } catch (error) {
+    } catch {
       toast.error('Erro ao remover imagem', { id: loadingToast });
     }
   };

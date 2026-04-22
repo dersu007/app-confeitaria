@@ -36,8 +36,8 @@ export const ResetPassword = () => {
       setTimeout(() => {
         navigate('/login', { replace: true });
       }, 1500);
-    } catch (error: any) {
-      toast.error(error.message || 'Erro ao redefinir senha.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Erro ao redefinir senha.');
     } finally {
       setLoading(false);
     }

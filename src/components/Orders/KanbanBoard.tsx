@@ -6,11 +6,9 @@ import {
   PointerSensor, 
   useSensor, 
   useSensors,
-  DragOverlay,
-  defaultDropAnimationSideEffects
+  DragEndEvent
 } from '@dnd-kit/core';
 import { 
-  arrayMove, 
   SortableContext, 
   sortableKeyboardCoordinates, 
   verticalListSortingStrategy,
@@ -19,9 +17,8 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { Pedido } from '../../types';
 import { formatCurrency } from '../../services/bakeryService';
-import { ptBR } from 'date-fns/locale';
 import { format, parseISO } from 'date-fns';
-import { Calendar as CalendarIcon, Clock, User, Package, AlertCircle } from 'lucide-react';
+import { Calendar as CalendarIcon, Package, AlertCircle } from 'lucide-react';
 
 interface KanbanBoardProps {
   pedidos: Pedido[];
@@ -43,7 +40,7 @@ export const KanbanBoard = ({ pedidos, onStatusChange, onOrderClick }: KanbanBoa
     })
   );
 
-  const handleDragEnd = (event: any) => {
+  const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over) return;
 

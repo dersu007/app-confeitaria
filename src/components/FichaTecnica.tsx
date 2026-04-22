@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { dataService } from '../services/dataService';
 import { useAuth } from '../lib/auth';
 import { Produto, ProdutoIngrediente, Ingrediente } from '../types';
@@ -23,11 +23,7 @@ export const FichaTecnica = ({ product: initialProduct, onClose, onUpdate }: Fic
   const [loading, setLoading] = useState(true);
   const [isAdding, setIsAdding] = useState(false);
 
-  useEffect(() => {
-    fetchData();
-  }, [initialProduct.id]);
-
-  const fetchData = async () => {
+  const fetchAllData = useCallback(async () => {
     if (!initialProduct.id) return;
     setLoading(true);
     try {
@@ -40,13 +36,17 @@ export const FichaTecnica = ({ product: initialProduct, onClose, onUpdate }: Fic
       setIngredients(ingData);
       setProdutoIngredientes(recData);
       if (prodData) setCurrentProduct(prodData);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Erro ao carregar dados da ficha técnica:', error);
       toast.error('Erro ao carregar dados');
     } finally {
       setLoading(false);
     }
-  };
+  }, [initialProduct.id]);
+
+  useEffect(() => {
+    Promise.resolve().then(() => fetchAllData());
+  }, [fetchAllData]);
 
   const addItem = async () => {
     if (!initialProduct.id || !user?.id) return;
@@ -77,7 +77,7 @@ export const FichaTecnica = ({ product: initialProduct, onClose, onUpdate }: Fic
         await updateProductTotals();
         toast.success('Ingrediente adicionado');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Erro ao adicionar ingrediente:', err);
       toast.error('Erro ao adicionar ingrediente');
     } finally {
@@ -85,7 +85,7 @@ export const FichaTecnica = ({ product: initialProduct, onClose, onUpdate }: Fic
     }
   };
 
-  const updateItem = async (id: string, field: string, value: any) => {
+  const updateItem = async (id: string, field: string, value: unknown) => {
     const item = produtoIngredientes.find(i => i.id === id);
     if (!item) return;
 
@@ -94,15 +94,15 @@ export const FichaTecnica = ({ product: initialProduct, onClose, onUpdate }: Fic
     let unit = item.unidade;
 
     if (field === 'ingrediente_id') {
-      ingredientId = value;
-      const availableUnits = getAvailableUnits(value);
+      ingredientId = value as string;
+      const availableUnits = getAvailableUnits(value as string);
       if (!availableUnits.includes(unit)) {
         unit = availableUnits[0];
       }
     } else if (field === 'quantidade') {
       quantity = Number(value) || 0;
     } else if (field === 'unidade') {
-      unit = value;
+      unit = value as string;
     }
 
     const ingredient = ingredients.find(ing => ing.id === ingredientId);
@@ -125,10 +125,10 @@ export const FichaTecnica = ({ product: initialProduct, onClose, onUpdate }: Fic
     try {
       await dataService.saveProdutoIngrediente(updatePayload);
       await updateProductTotals();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Erro ao atualizar item:', err);
       toast.error('Erro ao salvar alteração');
-      fetchData(); // Reverter para o estado do banco
+      fetchAllData(); // Reverter para o estado do banco
     }
   };
 
@@ -139,7 +139,7 @@ export const FichaTecnica = ({ product: initialProduct, onClose, onUpdate }: Fic
       setProdutoIngredientes(prev => prev.filter(i => i.id !== id));
       await updateProductTotals();
       toast.success('Removido da ficha');
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Erro ao deletar item:', err);
       toast.error('Erro ao remover item');
     }
@@ -156,7 +156,7 @@ export const FichaTecnica = ({ product: initialProduct, onClose, onUpdate }: Fic
         setCurrentProduct(updatedProduct);
       }
       onUpdate();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Erro ao recalcular totais do produto:', error);
     }
   };
@@ -217,7 +217,7 @@ export const FichaTecnica = ({ product: initialProduct, onClose, onUpdate }: Fic
                       value={item.quantidade}
                       onChange={(e) => {
                         const val = e.target.value.replace(',', '.');
-                        if (!isNaN(val as any)) {
+                        if (!isNaN(Number(val))) {
                           updateItem(item.id, 'quantidade', parseFloat(val) || 0);
                         }
                       }}

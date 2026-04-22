@@ -6,7 +6,7 @@ export interface Categoria {
   nome: string;
   margem_padrao: number;
   tipo_margem: TipoMargem;
-  ativo: boolean;
+  ativo?: boolean;
 }
 
 export interface Ingrediente {
@@ -21,12 +21,16 @@ export interface Ingrediente {
   fornecedor?: string | null;
   data_atualizacao: string;
   estoque_minimo: number;
+  estoque_minimo_unidades: number;
   estoque_atual: number;
+  categoria_id?: string;
+  ativo?: boolean;
+  categoria?: Categoria;
 }
 
 export interface Produto {
   id: string;
-  user_id?: string;
+  user_id: string;
   nome: string;
   categoria_id: string;
   rendimento_unidades: number;
@@ -39,24 +43,20 @@ export interface Produto {
   custo_mao_obra: number;
   custo_fixo_rateado: number;
   usar_margem_categoria: boolean;
-  margem_tipo?: TipoMargem;
-  margem_percentual?: number;
+  margem_tipo: TipoMargem;
+  margem_percentual: number;
   preco_venda_manual: number;
   usar_preco_manual: boolean;
   preco_venda_final: number;
   margem_real_calculada: number;
-  custo_embalagem?: number;
-  taxa_venda_percentual?: number;
-  imposto_percentual?: number;
+  custo_embalagem: number;
+  taxa_venda_percentual: number;
+  imposto_percentual: number;
   imagem_url?: string;
   modo_preparo?: string;
-  ativo: boolean;
+  ativo?: boolean;
   ingredientes?: ProdutoIngrediente[];
   categoria?: Categoria;
-  // Keep old names for compatibility if needed, but user said "assume it has these fields"
-  custo_total_calculado?: number;
-  custo_unitario_snapshot?: number;
-  rateio_despesas_fixas?: number;
 }
 
 export interface ProdutoIngrediente {
@@ -97,11 +97,11 @@ export interface Pedido {
   id: string;
   cliente_id: string;
   data_pedido: string;
+  created_at?: string;
   valor_total: number;
   status: 'Em preparação' | 'Pronto' | 'Em entrega' | 'Concluído' | 'Cancelado';
   prioridade?: 'Urgente' | 'Padrão' | 'Baixa';
   data_entrega: string;
-  tempo_estimado?: string;
   observacoes?: string;
   cliente?: Cliente;
   itens?: PedidoItem[];
@@ -130,4 +130,19 @@ export interface PedidoExtra {
 export interface CategoriaExtra {
   id: string;
   nome: string;
+}
+
+export type TipoMovimentacao = 'entrada' | 'saida';
+export type OrigemMovimentacao = 'ajuste_manual' | 'compra' | 'venda_produto';
+
+export interface MovimentacaoEstoque {
+  id: string;
+  insumo_id: string;
+  quantidade: number;
+  tipo: TipoMovimentacao;
+  origem: OrigemMovimentacao;
+  pedido_id?: string;
+  created_at: string;
+  user_id?: string;
+  insumo?: Ingrediente;
 }

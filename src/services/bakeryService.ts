@@ -1,4 +1,4 @@
-import { Ingrediente, Produto, ProdutoIngrediente, Categoria, TipoMargem } from '../types';
+import { Produto, Categoria, TipoMargem } from '../types';
 
 /**
  * Business logic for bakery calculations
@@ -67,7 +67,7 @@ export const calculateProductPricing = (
   taxaVendaPercentual: number = 0,
   impostoPercentual: number = 0
 ) => {
-  let precoVendaFinal = 0;
+  let precoVendaFinal: number;
   const custoTotalBase = custoProducao + custoEmbalagem;
   const taxasImpostosTotal = taxaVendaPercentual + impostoPercentual;
 
@@ -126,7 +126,7 @@ export const formatCurrency = (value: number) => {
  * Only includes fields that are defined and potentially exist in the schema.
  * Applies fallbacks for optional fields.
  */
-export const sanitizeProductUpdate = (productData: any) => {
+export const sanitizeProductUpdate = (productData: Partial<Produto>) => {
   // Core fields that are expected to always exist
   const coreFields = [
     'id',
@@ -163,10 +163,10 @@ export const sanitizeProductUpdate = (productData: any) => {
     'imposto_percentual'
   ];
 
-  const sanitized: any = {};
+  const sanitized: Record<string, unknown> = {};
 
   // Apply fallbacks to the input data if needed
-  const dataWithFallbacks = { ...productData };
+  const dataWithFallbacks = { ...productData } as Record<string, unknown>;
   
   if (dataWithFallbacks.imagem_url === '') {
     dataWithFallbacks.imagem_url = null;
@@ -189,14 +189,14 @@ export const sanitizeProductUpdate = (productData: any) => {
   return sanitized;
 };
 
-export const validateProductIntegrity = (product: Produto): string[] => {
+export const validateProductIntegrity = (product: Partial<Produto>): string[] => {
   const errors: string[] = [];
 
   if (!product.categoria_id) {
     errors.push("Categoria não definida");
   }
 
-  if (product.margem_real_calculada <= 0) {
+  if ((product.margem_real_calculada ?? 0) <= 0) {
     errors.push("Margem de lucro negativa ou zero");
   }
 
@@ -204,7 +204,7 @@ export const validateProductIntegrity = (product: Produto): string[] => {
     errors.push("Ficha técnica vazia");
   }
 
-  if (Number(product.rendimento_unidades) <= 0) {
+  if (Number(product.rendimento_unidades ?? 0) <= 0) {
     errors.push("Rendimento não configurado");
   }
 

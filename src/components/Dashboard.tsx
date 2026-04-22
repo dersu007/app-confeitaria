@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   Receipt, 
   TrendingUp, 
@@ -6,10 +6,8 @@ import {
   Wallet, 
   AlertTriangle,
   ArrowRight,
-  Package,
   Users,
   Loader2,
-  Calendar,
   FileBarChart
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
@@ -40,11 +38,21 @@ import {
   parseISO
 } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { dataService } from '../services/dataService';
-import { Produto, Pedido, Cliente, DespesaFixa } from '../types';
 import { formatCurrency } from '../services/bakeryService';
+import { ErrorBoundary } from 'react-error-boundary';
+import { ErrorFallback } from './ui/ErrorFallback';
+import { logErrorToBackend } from '../utils/errorUtils';
+import { useProdutos, usePedidos, useClientes, useDespesasFixas } from '../hooks/useQueries';
 
-const KPICard = ({ title, value, change, icon: Icon, trend }: any) => (
+interface KPICardProps {
+  title: string;
+  value: string | number;
+  change?: string | number;
+  icon: React.ElementType;
+  trend?: 'up' | 'down';
+}
+
+const KPICard = ({ title, value, change, icon: Icon, trend }: KPICardProps) => (
   <div id={`kpi-${title.toLowerCase().replace(/\s/g, '-')}`} className="bg-surface-container-lowest p-6 rounded-xl border border-surface-container-high flex flex-col gap-4 shadow-sm">
     <div className="flex justify-between items-start">
       <div className="p-2 bg-primary-container/30 rounded-lg text-primary">
@@ -66,44 +74,24 @@ const KPICard = ({ title, value, change, icon: Icon, trend }: any) => (
 type PeriodoVisao = 'Diário' | 'Semanal' | 'Mensal';
 
 export const Dashboard = () => {
-  const [produtos, setProdutos] = useState<Produto[]>([]);
-  const [pedidos, setPedidos] = useState<Pedido[]>([]);
-  const [clientes, setClientes] = useState<Cliente[]>([]);
-  const [despesas, setDespesas] = useState<DespesaFixa[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: produtos = [], isLoading: loadingProd } = useProdutos();
+  const { data: pedidos = [], isLoading: loadingPed } = usePedidos();
+  const { data: _clientes = [] } = useClientes();
+  const { data: despesas = [], isLoading: loadingDesp } = useDespesasFixas();
+  
   const [isExporting, setIsExporting] = useState(false);
   const [periodoVisao, setPeriodoVisao] = useState<PeriodoVisao>('Diário');
   
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
-  useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      try {
-        const [prodData, pedData, cliData, despData] = await Promise.all([
-          dataService.getProdutos(),
-          dataService.getPedidos(),
-          dataService.getClientes(),
-          dataService.getDespesasFixas()
-        ]);
-        setProdutos(prodData);
-        setPedidos(pedData);
-        setClientes(cliData);
-        setDespesas(despData);
-      } catch (error) {
-        console.error('Erro ao carregar dashboard:', error);
-        toast.error('Erro ao carregar dados do dashboard');
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
-  }, []);
+  const loading = loadingProd || loadingPed || loadingDesp;
 
   const stats = useMemo(() => {
     const filteredOrders = pedidos.filter(p => {
-      const d = parseISO(p.data_pedido || (p as any).created_at);
+      const dateStr = p.data_pedido;
+      if (!dateStr) return false;
+      const d = parseISO(dateStr);
       return d.getMonth() === selectedMonth && d.getFullYear() === selectedYear && p.status === 'Concluído';
     });
 
@@ -138,7 +126,9 @@ export const Dashboard = () => {
   const salesEvolution = useMemo(() => {
     const baseDate = new Date(selectedYear, selectedMonth, 1);
     const filteredOrders = pedidos.filter(p => {
-      const d = parseISO(p.data_pedido || (p as any).created_at);
+      const dateStr = p.data_pedido;
+      if (!dateStr) return false;
+      const d = parseISO(dateStr);
       return d.getMonth() === selectedMonth && d.getFullYear() === selectedYear && p.status === 'Concluído';
     });
 
@@ -150,7 +140,7 @@ export const Dashboard = () => {
 
       return daysInMonth.map(day => {
         const total = filteredOrders
-          .filter(p => isSameDay(parseISO(p.data_pedido || (p as any).created_at), day))
+          .filter(p => isSameDay(parseISO(p.data_pedido), day))
           .reduce((acc, p) => acc + (p.valor_total || 0), 0);
         
         return {
@@ -168,7 +158,11 @@ export const Dashboard = () => {
       return weeks.map((weekStart, index) => {
         const weekEnd = endOfWeek(weekStart, { weekStartsOn: 0 });
         const total = filteredOrders
-          .filter(p => isWithinInterval(parseISO(p.data_pedido || (p as any).created_at), { start: weekStart, end: weekEnd }))
+          .filter(p => {
+            const dateStr = p.data_pedido;
+            if (!dateStr) return false;
+            return isWithinInterval(parseISO(dateStr), { start: weekStart, end: weekEnd });
+          })
           .reduce((acc, p) => acc + (p.valor_total || 0), 0);
         
         return {
@@ -185,7 +179,11 @@ export const Dashboard = () => {
 
       return months.map(month => {
         const total = pedidos
-          .filter(p => p.status === 'Concluído' && isSameMonth(parseISO(p.data_pedido || (p as any).created_at), month))
+          .filter(p => {
+            const dateStr = p.data_pedido;
+            if (!dateStr) return false;
+            return p.status === 'Concluído' && isSameMonth(parseISO(dateStr), month);
+          })
           .reduce((acc, p) => acc + (p.valor_total || 0), 0);
         
         return {
@@ -204,7 +202,9 @@ export const Dashboard = () => {
 
     pedidos
       .filter(p => {
-        const d = parseISO(p.data_pedido || (p as any).created_at);
+        const dateStr = p.data_pedido;
+        if (!dateStr) return false;
+        const d = parseISO(dateStr);
         return d.getMonth() === selectedMonth && d.getFullYear() === selectedYear && p.status === 'Concluído';
       })
       .forEach(p => {
@@ -220,11 +220,10 @@ export const Dashboard = () => {
       .map(([name, value]) => ({
         name,
         value,
-        percentage: totalValue > 0 ? Math.round((value / totalValue) * 360) / 360 : 0 // percentage will be used for labels, value for chart
+        percentage: totalValue > 0 ? Math.round((value / totalValue) * 360) / 360 : 0
       }))
       .sort((a, b) => b.value - a.value);
 
-    // Re-calculating actual percentage for UI
     return sortedData.map(d => ({
       ...d,
       percentage: totalValue > 0 ? Math.round((d.value / totalValue) * 100) : 0
@@ -236,7 +235,9 @@ export const Dashboard = () => {
 
     pedidos
       .filter(p => {
-        const d = parseISO(p.data_pedido || (p as any).created_at);
+        const dateStr = p.data_pedido;
+        if (!dateStr) return false;
+        const d = parseISO(dateStr);
         return d.getMonth() === selectedMonth && d.getFullYear() === selectedYear && p.status === 'Concluído';
       })
       .forEach(p => {
@@ -258,10 +259,17 @@ export const Dashboard = () => {
   const recentOrders = useMemo(() => {
     return [...pedidos]
       .filter(p => {
-        const d = parseISO(p.data_pedido || (p as any).created_at);
+        const dateStr = p.data_pedido;
+        if (!dateStr) return false;
+        const d = parseISO(dateStr);
         return d.getMonth() === selectedMonth && d.getFullYear() === selectedYear;
       })
-      .sort((a, b) => new Date(b.data_pedido || (b as any).created_at).getTime() - new Date(a.data_pedido || (a as any).created_at).getTime())
+      .sort((a, b) => {
+        const dateA = a.data_pedido;
+        const dateB = b.data_pedido;
+        if (!dateA || !dateB) return 0;
+        return new Date(dateB).getTime() - new Date(dateA).getTime();
+      })
       .slice(0, 5);
   }, [pedidos, selectedMonth, selectedYear]);
 
@@ -390,115 +398,119 @@ export const Dashboard = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div id="sales-evolution-chart" className="lg:col-span-2 bg-surface-container-lowest p-8 rounded-xl border border-surface-container-high shadow-sm">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 mb-8">
-            <div>
-              <h2 className="text-xl font-bold headline text-on-surface">Evolução de Vendas</h2>
-              <p className="text-sm text-on-surface-variant">Visão {periodoVisao.toLowerCase()} de faturamento</p>
+          <ErrorBoundary FallbackComponent={ErrorFallback} onError={logErrorToBackend}>
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 mb-8">
+              <div>
+                <h2 className="text-xl font-bold headline text-on-surface">Evolução de Vendas</h2>
+                <p className="text-sm text-on-surface-variant">Visão {periodoVisao.toLowerCase()} de faturamento</p>
+              </div>
+              
+              <div className="flex bg-surface-container-low p-1 rounded-xl border border-surface-container-high shadow-inner">
+                {(['Diário', 'Semanal', 'Mensal'] as PeriodoVisao[]).map((periodo) => (
+                  <button
+                    key={periodo}
+                    onClick={() => setPeriodoVisao(periodo)}
+                    className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      periodoVisao === periodo 
+                        ? 'bg-white text-primary shadow-sm ring-1 ring-black/5' 
+                        : 'text-on-surface-variant hover:text-on-surface'
+                    }`}
+                  >
+                    {periodo}
+                  </button>
+                ))}
+              </div>
             </div>
             
-            <div className="flex bg-surface-container-low p-1 rounded-xl border border-surface-container-high shadow-inner">
-              {(['Diário', 'Semanal', 'Mensal'] as PeriodoVisao[]).map((periodo) => (
-                <button
-                  key={periodo}
-                  onClick={() => setPeriodoVisao(periodo)}
-                  className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                    periodoVisao === periodo 
-                      ? 'bg-white text-primary shadow-sm ring-1 ring-black/5' 
-                      : 'text-on-surface-variant hover:text-on-surface'
-                  }`}
-                >
-                  {periodo}
-                </button>
-              ))}
+            <div className="h-72 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={salesEvolution}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e1e3e2" />
+                  <XAxis 
+                    dataKey="name" 
+                    axisLine={false} 
+                    tickLine={false} 
+                    tick={{ fontSize: 10, fill: '#5d605f', fontWeight: 600 }} 
+                  />
+                  <YAxis 
+                    axisLine={false} 
+                    tickLine={false} 
+                    tick={{ fontSize: 10, fill: '#5d605f' }}
+                    tickFormatter={(val) => `R$${val >= 1000 ? (val/1000).toFixed(1) + 'k' : val}`}
+                  />
+                  <Tooltip 
+                    cursor={{ fill: '#f3f4f3', opacity: 0.4 }} 
+                    formatter={(value: number) => [formatCurrency(value), 'Faturamento']}
+                    contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 8px 30px rgba(0,0,0,0.12)', padding: '12px' }}
+                    itemStyle={{ fontWeight: 700, fontSize: '12px' }}
+                    labelStyle={{ fontWeight: 800, marginBottom: '4px', color: '#2b6a57' }}
+                  />
+                  <Bar 
+                    dataKey="faturamento" 
+                    fill="#2b6a57" 
+                    radius={[6, 6, 0, 0]} 
+                    animationBegin={200}
+                    animationDuration={1000}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
             </div>
-          </div>
-          
-          <div className="h-72 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={salesEvolution}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e1e3e2" />
-                <XAxis 
-                  dataKey="name" 
-                  axisLine={false} 
-                  tickLine={false} 
-                  tick={{ fontSize: 10, fill: '#5d605f', fontWeight: 600 }} 
-                />
-                <YAxis 
-                  axisLine={false} 
-                  tickLine={false} 
-                  tick={{ fontSize: 10, fill: '#5d605f' }}
-                  tickFormatter={(val) => `R$${val >= 1000 ? (val/1000).toFixed(1) + 'k' : val}`}
-                />
-                <Tooltip 
-                  cursor={{ fill: '#f3f4f3', opacity: 0.4 }} 
-                  formatter={(value: number) => [formatCurrency(value), 'Faturamento']}
-                  contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 8px 30px rgba(0,0,0,0.12)', padding: '12px' }}
-                  itemStyle={{ fontWeight: 700, fontSize: '12px' }}
-                  labelStyle={{ fontWeight: 800, marginBottom: '4px', color: '#2b6a57' }}
-                />
-                <Bar 
-                  dataKey="faturamento" 
-                  fill="#2b6a57" 
-                  radius={[6, 6, 0, 0]} 
-                  animationBegin={200}
-                  animationDuration={1000}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          </ErrorBoundary>
         </div>
 
         <div id="category-distribution-chart" className="bg-surface-container-lowest p-8 rounded-xl border border-surface-container-high shadow-sm flex flex-col">
-          <div className="mb-8">
-            <h2 className="text-xl font-bold headline text-on-surface">Distribuição</h2>
-            <p className="text-sm text-on-surface-variant">Faturamento por categoria</p>
-          </div>
-          
-          <div className="flex-grow flex items-center justify-center relative">
-            <ResponsiveContainer width="100%" height={220}>
-              <PieChart>
-                <Pie
-                  data={categoryDistribution}
-                  innerRadius={70}
-                  outerRadius={95}
-                  paddingAngle={6}
-                  dataKey="value"
-                  animationBegin={400}
-                  animationDuration={1200}
-                >
-                  {categoryDistribution.map((entry, index) => (
-                    <Cell 
-                      key={`cell-${index}`} 
-                      fill={COLORS[index % COLORS.length]} 
-                      stroke="none"
-                    />
-                  ))}
-                </Pie>
-                <Tooltip 
-                  formatter={(value: number) => [formatCurrency(value), 'Faturamento']}
-                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className="text-[10px] uppercase font-bold text-on-surface-variant tracking-widest">Total</span>
-              <span className="text-lg font-black text-on-surface">100%</span>
+          <ErrorBoundary FallbackComponent={ErrorFallback} onError={logErrorToBackend}>
+            <div className="mb-8">
+              <h2 className="text-xl font-bold headline text-on-surface">Distribuição</h2>
+              <p className="text-sm text-on-surface-variant">Faturamento por categoria</p>
             </div>
-          </div>
-          
-          <div className="space-y-3 mt-8">
-            {categoryDistribution.map((item, i) => (
-              <div key={item.name} className="flex justify-between items-center group">
-                <div className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }}></div>
-                  <span className="text-xs font-bold text-on-surface group-hover:text-primary transition-colors">{item.name}</span>
-                </div>
-                <div className="text-right">
-                  <span className="text-xs font-black text-on-surface">{item.percentage}%</span>
-                </div>
+            
+            <div className="flex-grow flex items-center justify-center relative">
+              <ResponsiveContainer width="100%" height={220}>
+                <PieChart>
+                  <Pie
+                    data={categoryDistribution}
+                    innerRadius={70}
+                    outerRadius={95}
+                    paddingAngle={6}
+                    dataKey="value"
+                    animationBegin={400}
+                    animationDuration={1200}
+                  >
+                    {categoryDistribution.map((_, index) => (
+                      <Cell 
+                        key={`cell-${index}`} 
+                        fill={COLORS[index % COLORS.length]} 
+                        stroke="none"
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip 
+                    formatter={(value: number) => [formatCurrency(value), 'Faturamento']}
+                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                <span className="text-[10px] uppercase font-bold text-on-surface-variant tracking-widest">Total</span>
+                <span className="text-lg font-black text-on-surface">100%</span>
               </div>
-            ))}
-          </div>
+            </div>
+            
+            <div className="space-y-3 mt-8">
+              {categoryDistribution.map((item, i) => (
+                <div key={item.name} className="flex justify-between items-center group">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }}></div>
+                    <span className="text-xs font-bold text-on-surface group-hover:text-primary transition-colors">{item.name}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-xs font-black text-on-surface">{item.percentage}%</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </ErrorBoundary>
         </div>
       </div>
 
@@ -564,7 +576,7 @@ export const Dashboard = () => {
                     <td className="px-8 py-5">
                       <div className="flex flex-col">
                         <span className="text-sm font-bold text-on-surface">{pedido.cliente?.nome || 'Cliente não identificado'}</span>
-                        <span className="text-[10px] text-on-surface-variant">{format(parseISO(pedido.data_pedido || (pedido as any).created_at), 'dd/MM/yyyy HH:mm', { locale: ptBR })}</span>
+                        <span className="text-[10px] text-on-surface-variant">{format(parseISO(pedido.data_pedido || pedido.created_at || new Date().toISOString()), 'dd/MM/yyyy HH:mm', { locale: ptBR })}</span>
                       </div>
                     </td>
                     <td className="px-8 py-5 border-r border-surface-container-high/50">

@@ -4,7 +4,7 @@ import { ptBR } from 'date-fns/locale';
 /**
  * Utilitário genérico para exportação de dados para CSV compatível com Excel (PT-BR).
  */
-export const exportToCSV = <T extends Record<string, any>>(
+export const exportToCSV = <T extends Record<string, unknown>>(
   data: T[],
   columns: Record<string, string>,
   fileNamePrefix: string

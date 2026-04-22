@@ -29,8 +29,9 @@ export const Login = () => {
       setTimeout(() => {
         navigate(from, { replace: true });
       }, 1000);
-    } catch (error: any) {
-      toast.error(error.message || 'Erro ao entrar. Verifique suas credenciais.');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Erro ao entrar. Verifique suas credenciais.';
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -49,8 +50,9 @@ export const Login = () => {
 
       toast.success('Link de recuperação enviado para o seu e-mail!');
       setIsRecovering(false);
-    } catch (error: any) {
-      toast.error(error.message || 'Erro ao enviar e-mail de recuperação.');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Erro ao enviar e-mail de recuperação.';
+      toast.error(message);
     } finally {
       setLoading(false);
     }

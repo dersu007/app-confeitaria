@@ -1,23 +1,20 @@
 import React, { useState } from 'react';
 import { DatabaseGrid, EditableCell, SelectCell } from './DatabaseGrid';
 import { createColumnHelper } from '@tanstack/react-table';
-import { Database, RefreshCw, AlertTriangle, Plus, Edit2, Download } from 'lucide-react';
+import { Database, RefreshCw, AlertTriangle, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { dataService } from '../services/dataService';
+import { useRecalculateEverything } from '../hooks/useQueries';
 import { formatCurrency } from '../services/bakeryService';
 import { format } from 'date-fns';
-import { IngredienteModal } from './Insumos/IngredienteModal';
 import { Ingrediente } from '../types';
 import { exportToCSV } from '../utils/csvUtils';
 
 const columnHelper = createColumnHelper<Ingrediente>();
 
 export const Insumos = () => {
-  const [refreshKey, setRefreshKey] = useState(0);
   const [isExporting, setIsExporting] = useState(false);
-  const [isRecalculating, setIsRecalculating] = useState(false);
-
-  const refresh = () => setRefreshKey(prev => prev + 1);
+  const recalculateEverythingMutation = useRecalculateEverything();
 
   const handleExportCSV = async () => {
     setIsExporting(true);
@@ -52,7 +49,7 @@ export const Insumos = () => {
         'insumos_completo'
       );
       if (success) toast.success('Relatório completo de insumos exportado!');
-    } catch (error) {
+    } catch {
       toast.error('Erro ao exportar CSV');
     } finally {
       setIsExporting(false);
@@ -60,17 +57,7 @@ export const Insumos = () => {
   };
 
   const recalculateAll = async () => {
-    setIsRecalculating(true);
-    const loadingToast = toast.loading('Recalculando toda a base de custos...');
-    try {
-      await dataService.recalculateEverything();
-      refresh();
-      toast.success('Custos recalculados com sucesso!', { id: loadingToast });
-    } catch (error) {
-      toast.error('Erro ao recalcular', { id: loadingToast });
-    } finally {
-      setIsRecalculating(false);
-    }
+    recalculateEverythingMutation.mutate();
   };
 
   const ingredientColumns = [
@@ -93,23 +80,28 @@ export const Insumos = () => {
     columnHelper.accessor('peso_embalagem', { header: 'Qtd. Emb.', cell: EditableCell }),
     columnHelper.accessor('preco_embalagem', { header: 'Preço Emb.', cell: EditableCell }),
     columnHelper.accessor('estoque_atual', { 
-      header: 'Estoque Atual', 
-      cell: (props: any) => {
-        const { estoque_atual, estoque_minimo } = props.row.original;
+      header: 'Saldo Atual', 
+      cell: (props) => {
+        const { estoque_atual, estoque_minimo, unidade_base } = props.row.original;
         const isCritical = estoque_atual <= estoque_minimo;
         return (
-          <div className="flex items-center gap-2">
-            <input
-              value={props.getValue() ?? ''}
-              onChange={e => props.table.options.meta?.updateData(props.row.original.id, props.column.id, e.target.value)}
-              className={`w-full bg-transparent border-none focus:ring-1 focus:ring-primary/30 rounded px-1 -mx-1 py-1 outline-none font-medium ${isCritical ? 'text-error font-bold' : ''}`}
-            />
+          <div className="flex items-center gap-2" title="Alterar saldo apenas via aba Estoque">
+            <span className={`font-bold ${isCritical ? 'text-error' : 'text-on-surface'}`}>
+              {estoque_atual} {unidade_base}
+            </span>
             {isCritical && <AlertTriangle size={14} className="text-error animate-pulse" />}
           </div>
         );
       }
     }),
-    columnHelper.accessor('estoque_minimo', { header: 'Estoque Mín.', cell: EditableCell }),
+    columnHelper.accessor('estoque_minimo_unidades', { 
+      header: 'Estoque Mín.', 
+      cell: (info) => (
+        <span className="text-xs font-medium text-on-surface-variant">
+          {info.getValue() || 0} un
+        </span>
+      )
+    }),
     columnHelper.accessor('preco_por_unidade_base', { 
       header: 'Custo g/ml', 
       cell: info => <span className="font-mono text-[10px] text-primary">{formatCurrency(info.getValue() || 0)}</span> 
@@ -129,11 +121,11 @@ export const Insumos = () => {
         <div className="flex gap-3">
           <button 
             onClick={recalculateAll}
-            disabled={isRecalculating}
+            disabled={recalculateEverythingMutation.isPending}
             className="flex items-center gap-2 bg-surface-container-low text-primary px-4 py-3 rounded-xl font-bold border border-primary/20 hover:bg-primary/5 transition-all text-sm disabled:opacity-50"
             title="Recalcula custos de todos os produtos"
           >
-            <RefreshCw size={18} className={isRecalculating ? 'animate-spin' : ''} /> Recalcular Tudo
+            <RefreshCw size={18} className={recalculateEverythingMutation.isPending ? 'animate-spin' : ''} /> Recalcular Tudo
           </button>
           <button 
             onClick={handleExportCSV}
@@ -151,7 +143,6 @@ export const Insumos = () => {
           title="Base de Ingredientes" 
           columns={ingredientColumns} 
           onDataChange={recalculateAll} 
-          refreshKey={refreshKey} 
         />
       </div>
     </div>

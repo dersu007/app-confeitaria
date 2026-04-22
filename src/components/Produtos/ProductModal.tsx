@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useForm, Controller } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { productSchema, ProductFormValues } from '../../schemas/productSchema';
 import { dataService } from '../../services/dataService';
 import { useAuth } from '../../lib/auth';
-import { Produto, Categoria } from '../../types';
-import { X, Plus, Package, Image, Clock, Calculator, Save, Weight, DollarSign, Upload, Loader2, Trash2 } from 'lucide-react';
+import { Produto, Categoria, TipoMargem } from '../../types';
+import { X, Plus, Package, Image, Clock, Calculator, Save, Upload, Loader2, Trash2, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { formatCurrency, calculateProductPricing, calculateUnitCost, resolveProductMargin, validateProductIntegrity } from '../../services/bakeryService';
 import { FichaTecnica } from '../FichaTecnica';
 import { DEFAULT_PRODUCT_IMAGE, DEFAULT_CUSTO_HORA } from '../../constants';
-import { AlertTriangle } from 'lucide-react';
 
 interface ProductModalProps {
   produto?: Produto | null;
@@ -18,43 +20,81 @@ interface ProductModalProps {
 
 export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModalProps) => {
   const { user } = useAuth();
-  const [nome, setNome] = useState(produto?.nome || '');
-  const [categoriaId, setCategoriaId] = useState(produto?.categoria_id || '');
-  const [imagemUrl, setImagemUrl] = useState(produto?.imagem_url || '');
-  const [tempoProducaoValor, setTempoProducaoValor] = useState(produto?.tempo_producao_valor || 0);
-  const [tempoProducaoUnidade, setTempoProducaoUnidade] = useState<'horas' | 'minutos'>(produto?.tempo_producao_unidade || 'horas');
-  const [modoPreparo, setModoPreparo] = useState(produto?.modo_preparo || '');
-  const [rendimentoUnidades, setRendimentoUnidades] = useState(produto?.rendimento_unidades || 1);
-  const [pesoFinal, setPesoFinal] = useState(produto?.peso_final_produto || 0);
-  const [custoHoraTrabalho, setCustoHoraTrabalho] = useState(produto?.custo_hora_trabalho || (produto ? 0 : DEFAULT_CUSTO_HORA));
-  const [custoFixoRateado, setCustoFixoRateado] = useState(produto?.custo_fixo_rateado || 0);
-  const [custoEmbalagem, setCustoEmbalagem] = useState(produto?.custo_embalagem || 0);
-  const [taxaVendaPercentual, setTaxaVendaPercentual] = useState(produto?.taxa_venda_percentual || 0);
-  const [impostoPercentual, setImpostoPercentual] = useState(produto?.imposto_percentual || 0);
-  
-  const [usarPrecoManual, setUsarPrecoManual] = useState(produto?.usar_preco_manual || false);
-  const [precoVendaManual, setPrecoVendaManual] = useState(produto?.preco_venda_manual || 0);
-  const [usarMargemCategoria, setUsarMargemCategoria] = useState(produto?.usar_margem_categoria ?? true);
-  const [margemPercentual, setMargemPercentual] = useState(produto?.margem_percentual || 0);
-  const [margemTipo, setMargemTipo] = useState(produto?.margem_tipo || 'margem_real');
-
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [showFichaTecnica, setShowFichaTecnica] = useState(false);
   const [custoInsumos, setCustoInsumos] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [productToEditState, setProductToEditState] = useState<Produto | null>(produto || null);
+
+  const {
+    register,
+    handleSubmit,
+    control,
+    watch,
+    setValue,
+    reset,
+    formState: { errors, isSubmitting },
+  } = useForm<ProductFormValues>({
+    resolver: zodResolver(productSchema),
+    defaultValues: {
+      nome: produto?.nome || '',
+      categoria_id: produto?.categoria_id || '',
+      rendimento_unidades: produto?.rendimento_unidades || 1,
+      tempo_producao_valor: produto?.tempo_producao_valor || 0,
+      tempo_producao_unidade: (produto?.tempo_producao_unidade as 'horas' | 'minutos') || 'horas',
+      usar_margem_categoria: produto?.usar_margem_categoria ?? true,
+      margem_percentual: produto?.margem_percentual || 0,
+      margem_tipo: (produto?.margem_tipo as TipoMargem) || 'margem_real',
+      usar_preco_manual: produto?.usar_preco_manual || false,
+      preco_venda_manual: produto?.preco_venda_manual || 0,
+      custo_embalagem: produto?.custo_embalagem || 0,
+      taxa_venda_percentual: produto?.taxa_venda_percentual || 0,
+      imposto_percentual: produto?.imposto_percentual || 0,
+      imagem_url: produto?.imagem_url || '',
+      modo_preparo: produto?.modo_preparo || '',
+      ativo: produto?.ativo ?? true,
+    },
+  });
+
+  const formValues = watch();
 
   useEffect(() => {
     fetchData();
     if (produto?.id) {
       fetchIngredientsCost();
     }
-  }, [produto]);
+  }, [produto?.id, fetchData, fetchIngredientsCost]);
 
-  const fetchIngredientsCost = async () => {
+  useEffect(() => {
+    if (produto) {
+      reset({
+        nome: produto.nome,
+        categoria_id: produto.categoria_id,
+        rendimento_unidades: produto.rendimento_unidades,
+        tempo_producao_valor: produto.tempo_producao_valor,
+        tempo_producao_unidade: produto.tempo_producao_unidade,
+        usar_margem_categoria: produto.usar_margem_categoria,
+        margem_percentual: produto.margem_percentual,
+        margem_tipo: produto.margem_tipo,
+        usar_preco_manual: produto.usar_preco_manual,
+        preco_venda_manual: produto.preco_venda_manual,
+        custo_embalagem: produto.custo_embalagem,
+        taxa_venda_percentual: produto.taxa_venda_percentual,
+        imposto_percentual: produto.imposto_percentual,
+        imagem_url: produto.imagem_url,
+        modo_preparo: produto.modo_preparo,
+        ativo: produto.ativo,
+      });
+      setProductToEditState(produto);
+    }
+  }, [produto, reset]);
+
+  const fetchIngredientsCost = React.useCallback(async () => {
+    if (!produto?.id) return;
     try {
-      const data = await dataService.getProdutoIngredientes(produto?.id!);
+      const data = await dataService.getProdutoIngredientes(produto.id);
       if (data) {
         const total = data.reduce((acc, item) => acc + (item.custo_calculado || 0), 0);
         setCustoInsumos(total);
@@ -62,27 +102,37 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
     } catch (error) {
       console.error('Erro ao buscar custo de ingredientes:', error);
     }
-  };
+  }, [produto?.id]);
 
-  const fetchData = async () => {
+  const fetchData = React.useCallback(async () => {
     try {
       const data = await dataService.getCategorias();
       setCategorias(data || []);
-    } catch (error: any) {
-      console.error('Erro ao carregar categorias:', error);
+    } catch (error) {
+      console.error('Erro ao buscar categorias:', error);
       setCategorias([]);
     }
-  };
+  }, []);
 
-  const tempoEmHoras = tempoProducaoUnidade === 'minutos' ? (Number(tempoProducaoValor) || 0) / 60 : (Number(tempoProducaoValor) || 0);
-  const laborCost = tempoEmHoras * (Number(custoHoraTrabalho) || 0);
-  const fixedCost = Number(custoFixoRateado) || 0;
+  // Pricing calculations
+  const tempoEmHoras = formValues.tempo_producao_unidade === 'minutos' 
+    ? (Number(formValues.tempo_producao_valor) || 0) / 60 
+    : (Number(formValues.tempo_producao_valor) || 0);
+  
+  // Note: We use DEFAULT_CUSTO_HORA if no product or if custo_hora_trabalho is not defined
+  const currentCustoHora = productToEditState?.custo_hora_trabalho || (produto ? 0 : DEFAULT_CUSTO_HORA);
+  const laborCost = tempoEmHoras * currentCustoHora;
+  const fixedCost = productToEditState?.custo_fixo_rateado || 0;
   const fullTotalCost = custoInsumos + laborCost + fixedCost;
-  const currentUnitCost = calculateUnitCost(fullTotalCost, rendimentoUnidades);
-  const selectedCategoria = categorias.find(c => c.id === categoriaId);
+  const currentUnitCost = calculateUnitCost(fullTotalCost, formValues.rendimento_unidades || 1);
+  const selectedCategoria = categorias.find(c => c.id === formValues.categoria_id);
   
   const activeMargin = resolveProductMargin(
-    { usar_margem_categoria: usarMargemCategoria, margem_percentual: margemPercentual, margem_tipo: margemTipo },
+    { 
+      usar_margem_categoria: formValues.usar_margem_categoria, 
+      margem_percentual: formValues.margem_percentual, 
+      margem_tipo: formValues.margem_tipo 
+    },
     selectedCategoria
   );
 
@@ -90,16 +140,16 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
     currentUnitCost,
     activeMargin.margem,
     activeMargin.tipo,
-    usarPrecoManual,
-    precoVendaManual,
-    custoEmbalagem,
-    taxaVendaPercentual,
-    impostoPercentual
+    formValues.usar_preco_manual,
+    formValues.preco_venda_manual,
+    formValues.custo_embalagem,
+    formValues.taxa_venda_percentual,
+    formValues.imposto_percentual
   );
 
   const handleOpenFichaTecnica = async () => {
-    if (!produto?.id) {
-      if (!nome) {
+    if (!productToEditState?.id) {
+      if (!formValues.nome) {
         toast.error('Preencha o nome para iniciar a ficha técnica');
         return;
       }
@@ -108,57 +158,43 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
       try {
         const rawProductData = {
           user_id: user?.id,
-          nome,
-          categoria_id: categoriaId || null,
-          rendimento_unidades: rendimentoUnidades,
-          tempo_producao_valor: tempoProducaoValor,
-          tempo_producao_unidade: tempoProducaoUnidade,
-          custo_hora_trabalho: custoHoraTrabalho,
-          custo_fixo_rateado: custoFixoRateado,
-          custo_embalagem: custoEmbalagem,
-          taxa_venda_percentual: taxaVendaPercentual,
-          imposto_percentual: impostoPercentual,
-          usar_margem_categoria: usarMargemCategoria,
-          margem_percentual: margemPercentual,
-          margem_tipo: margemTipo,
-          usar_preco_manual: usarPrecoManual,
-          preco_venda_manual: precoVendaManual
+          ...formValues,
+          custo_hora_trabalho: currentCustoHora,
+          custo_fixo_rateado: fixedCost,
+          // Other derived fields
+          custo_mao_obra: laborCost,
+          custo_total: fullTotalCost,
+          custo_unitario: currentUnitCost,
+          preco_venda_final: precoVendaFinal,
+          margem_real_calculada: margemRealCalculada,
+          ativo: true
         };
 
-        const savedProduct = await dataService.saveProduto(rawProductData as any);
+        const savedProduct = await dataService.saveProduto(rawProductData as Partial<Produto>);
         if (savedProduct) {
           toast.success('Produto criado! Agora você pode adicionar ingredientes.', { id: loadingToast });
-          onSave(); // Refresh list
-          // Update local state to reflect we now have an ID
+          onSave(); 
           setProductToEditState(savedProduct);
           setShowFichaTecnica(true);
         }
-      } catch (error: any) {
-        toast.error(`Erro ao criar produto: ${error.message}`, { id: loadingToast });
+      } catch (error) {
+        toast.error(`Erro ao criar produto: ${error instanceof Error ? error.message : 'Erro desconhecido'}`, { id: loadingToast });
       }
     } else {
       setShowFichaTecnica(true);
     }
   };
 
-  const [productToEditState, setProductToEditState] = useState<Produto | null>(produto || null);
-
   const integrityErrors = useMemo(() => {
     if (!productToEditState) return [];
-    // Construct a temporary product object with current state to validate in real-time
     const tempProduct = {
       ...productToEditState,
-      categoria_id: categoriaId,
-      rendimento_unidades: rendimentoUnidades,
+      ...formValues,
       margem_real_calculada: margemRealCalculada,
       ingredientes: productToEditState.ingredientes || []
     };
-    return validateProductIntegrity(tempProduct as any);
-  }, [productToEditState, categoriaId, rendimentoUnidades, margemRealCalculada, productToEditState?.ingredientes]);
-
-  useEffect(() => {
-    setProductToEditState(produto || null);
-  }, [produto]);
+    return validateProductIntegrity(tempProduct);
+  }, [productToEditState, formValues, margemRealCalculada]);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -168,18 +204,18 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
     setUploading(true);
     try {
       const url = await dataService.uploadImage(file, 'produtos');
-      setImagemUrl(url);
+      setValue('imagem_url', url);
       toast.success('Imagem enviada com sucesso!', { id: loadingToast });
-    } catch (error: any) {
+    } catch (error) {
       console.error('Erro no upload:', error);
-      toast.error('Erro ao enviar imagem. Verifique se o bucket "produtos" existe no Supabase.', { id: loadingToast });
+      toast.error('Erro ao enviar imagem.', { id: loadingToast });
     } finally {
       setUploading(false);
     }
   };
 
   const handleDelete = async () => {
-    if (!produto?.id || !onDelete) return;
+    if (!productToEditState?.id || !onDelete) return;
     
     if (!confirmDelete) {
       setConfirmDelete(true);
@@ -188,7 +224,7 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
 
     setDeleting(true);
     try {
-      await onDelete(produto.id);
+      await onDelete(productToEditState.id);
     } catch (error) {
       console.error('Erro ao excluir no modal:', error);
     } finally {
@@ -197,62 +233,34 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!nome) {
-      toast.error('O nome do produto é obrigatório');
-      return;
-    }
-
+  const onFormSubmit = async (data: ProductFormValues) => {
     const loadingToast = toast.loading('Salvando produto...');
 
     try {
       const rawProductData = {
         id: productToEditState?.id,
         user_id: productToEditState?.user_id || user?.id,
-        nome,
-        categoria_id: categoriaId || null,
-        imagem_url: imagemUrl,
-        tempo_producao_valor: tempoProducaoValor,
-        tempo_producao_unidade: tempoProducaoUnidade,
-        custo_hora_trabalho: custoHoraTrabalho,
+        ...data,
+        custo_hora_trabalho: currentCustoHora,
         custo_mao_obra: laborCost,
-        custo_fixo_rateado: custoFixoRateado,
-        custo_embalagem: custoEmbalagem,
-        taxa_venda_percentual: taxaVendaPercentual,
-        imposto_percentual: impostoPercentual,
-        modo_preparo: modoPreparo,
-        rendimento_unidades: rendimentoUnidades,
-        peso_final_produto: pesoFinal,
+        custo_fixo_rateado: fixedCost,
         custo_total: fullTotalCost,
         custo_unitario: currentUnitCost,
-        usar_preco_manual: usarPrecoManual,
-        preco_venda_manual: precoVendaManual,
-        usar_margem_categoria: usarMargemCategoria,
-        margem_percentual: margemPercentual,
-        margem_tipo: margemTipo,
         preco_venda_final: precoVendaFinal,
         margem_real_calculada: margemRealCalculada,
-        // Backwards compatibility
-        custo_total_calculado: custoInsumos,
-        custo_unitario_snapshot: currentUnitCost,
-        ativo: productToEditState?.ativo ?? true
       };
 
-      const savedProduct = await dataService.saveProduto(rawProductData as any);
+      const savedProduct = await dataService.saveProduto(rawProductData as Partial<Produto>);
       
       if (!savedProduct) throw new Error("Erro ao salvar produto");
 
-      // Recalculate after save to ensure all totals are correct
       await dataService.recalculateProduct(savedProduct.id);
 
       toast.success('Produto salvo com sucesso!', { id: loadingToast });
-      
-      // Call onSave which handles refreshing the UI in the parent component
       onSave();
-    } catch (error: any) {
+    } catch (error) {
       console.error('Erro ao salvar produto:', error);
-      toast.error(`Erro ao salvar: ${error.message}`, { id: loadingToast });
+      toast.error(`Erro ao salvar: ${error instanceof Error ? error.message : 'Erro desconhecido'}`, { id: loadingToast });
     }
   };
 
@@ -265,7 +273,15 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
               <Package size={24} />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-on-surface">{produto ? 'Editar Produto' : 'Novo Produto'}</h2>
+              <h2 className="text-xl font-bold text-on-surface flex items-center gap-2">
+                {produto ? 'Editar Produto' : 'Novo Produto'}
+                {integrityErrors.length > 0 && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-error/10 text-error text-[8px] font-bold uppercase tracking-widest rounded-full border border-error/20">
+                    <AlertTriangle size={10} />
+                    Incompleto
+                  </span>
+                )}
+              </h2>
               <p className="text-xs text-on-surface-variant">Configure as informações e precificação do produto.</p>
             </div>
           </div>
@@ -274,40 +290,33 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex-grow overflow-y-auto p-6 space-y-8">
+        <form onSubmit={handleSubmit(onFormSubmit)} className="flex-grow overflow-y-auto p-6 space-y-8">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             {/* Left Column: Basic Info */}
             <div className="space-y-6">
               <div className="space-y-1.5">
                 <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Nome do Produto</label>
                 <input 
-                  required
-                  type="text"
-                  value={nome}
-                  onChange={e => setNome(e.target.value)}
+                  {...register('nome')}
                   placeholder="Ex: Pão Italiano"
-                  className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
+                  className={`w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 ${errors.nome ? 'ring-2 ring-error' : ''}`}
                 />
+                {errors.nome && <p className="text-xs text-error mt-1">{errors.nome.message}</p>}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Categoria</label>
                   <select 
-                    value={categoriaId}
-                    onChange={e => setCategoriaId(e.target.value)}
-                    className={`w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 ${!categoriaId ? 'ring-1 ring-error/50' : ''}`}
+                    {...register('categoria_id')}
+                    className={`w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 ${errors.categoria_id ? 'ring-2 ring-error' : ''}`}
                   >
-                    <option value="">Sem Categoria</option>
+                    <option value="">Selecione uma categoria</option>
                     {categorias.map(c => (
                       <option key={c.id} value={c.id}>{c.nome}</option>
                     ))}
                   </select>
-                  {!categoriaId && (
-                    <p className="text-[9px] text-error font-medium flex items-center gap-1 mt-1">
-                      <AlertTriangle size={10} /> Categoria obrigatória para o sistema
-                    </p>
-                  )}
+                  {errors.categoria_id && <p className="text-xs text-error mt-1">{errors.categoria_id.message}</p>}
                 </div>
               </div>
 
@@ -319,20 +328,20 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
                   <div className="flex gap-2">
                     <input 
                       type="number"
-                      value={tempoProducaoValor}
-                      onChange={e => setTempoProducaoValor(Number(e.target.value))}
+                      step="any"
+                      {...register('tempo_producao_valor', { valueAsNumber: true })}
                       placeholder="0"
-                      className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
+                      className={`w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 ${errors.tempo_producao_valor ? 'ring-2 ring-error' : ''}`}
                     />
                     <select
-                      value={tempoProducaoUnidade}
-                      onChange={e => setTempoProducaoUnidade(e.target.value as 'horas' | 'minutos')}
+                      {...register('tempo_producao_unidade')}
                       className="w-32 px-2 py-2.5 bg-surface-container-low border-none rounded-xl text-xs focus:ring-2 focus:ring-primary/20"
                     >
                       <option value="horas">Horas</option>
                       <option value="minutos">Minutos</option>
                     </select>
                   </div>
+                  {errors.tempo_producao_valor && <p className="text-xs text-error mt-1">{errors.tempo_producao_valor.message}</p>}
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest flex items-center gap-1.5">
@@ -340,67 +349,25 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
                   </label>
                   <input 
                     type="number"
-                    value={rendimentoUnidades}
-                    onChange={e => setRendimentoUnidades(Number(e.target.value))}
-                    className={`w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 ${rendimentoUnidades <= 0 ? 'ring-1 ring-error/50' : ''}`}
+                    {...register('rendimento_unidades', { valueAsNumber: true })}
+                    className={`w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 ${errors.rendimento_unidades ? 'ring-2 ring-error' : ''}`}
                   />
-                  {rendimentoUnidades <= 0 && (
-                    <p className="text-[9px] text-error font-medium flex items-center gap-1 mt-1">
-                      <AlertTriangle size={10} /> Rendimento deve ser maior que zero
-                    </p>
-                  )}
+                  {errors.rendimento_unidades && <p className="text-xs text-error mt-1">{errors.rendimento_unidades.message}</p>}
                 </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest flex items-center gap-1.5">
-                    <Weight size={12} /> Peso Final (g)
-                  </label>
-                  <input 
-                    type="number"
-                    value={pesoFinal}
-                    onChange={e => setPesoFinal(Number(e.target.value))}
-                    className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest flex items-center gap-1.5">
-                    <DollarSign size={12} /> Custo Hora (R$)
-                  </label>
-                  <input 
-                    type="number"
-                    value={custoHoraTrabalho}
-                    onChange={e => setCustoHoraTrabalho(Number(e.target.value))}
-                    className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest flex items-center gap-1.5">
-                  <Calculator size={12} /> Rateio Custos Fixos (R$)
-                </label>
-                <input 
-                  type="number"
-                  value={custoFixoRateado}
-                  onChange={e => setCustoFixoRateado(Number(e.target.value))}
-                  className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
-                />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="space-y-1.5">
+                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest flex items-center gap-1.5">
                     <Package size={12} /> Custo Embalagem (R$)
                   </label>
                   <input 
                     type="number"
                     step="0.01"
-                    value={custoEmbalagem}
-                    onChange={e => setCustoEmbalagem(Number(e.target.value))}
+                    {...register('custo_embalagem', { valueAsNumber: true })}
                     className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
                   />
+                  {errors.custo_embalagem && <p className="text-xs text-error mt-1">{errors.custo_embalagem.message}</p>}
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest flex items-center gap-1.5">
@@ -409,10 +376,10 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
                   <input 
                     type="number"
                     step="0.1"
-                    value={taxaVendaPercentual}
-                    onChange={e => setTaxaVendaPercentual(Number(e.target.value))}
+                    {...register('taxa_venda_percentual', { valueAsNumber: true })}
                     className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
                   />
+                  {errors.taxa_venda_percentual && <p className="text-xs text-error mt-1">{errors.taxa_venda_percentual.message}</p>}
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest flex items-center gap-1.5">
@@ -421,10 +388,10 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
                   <input 
                     type="number"
                     step="0.1"
-                    value={impostoPercentual}
-                    onChange={e => setImpostoPercentual(Number(e.target.value))}
+                    {...register('imposto_percentual', { valueAsNumber: true })}
                     className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
                   />
+                  {errors.imposto_percentual && <p className="text-xs text-error mt-1">{errors.imposto_percentual.message}</p>}
                 </div>
               </div>
 
@@ -435,10 +402,9 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
                 <div className="flex gap-2">
                   <input 
                     type="text"
-                    value={imagemUrl}
-                    onChange={e => setImagemUrl(e.target.value)}
+                    {...register('imagem_url')}
                     placeholder="URL da imagem ou faça upload..."
-                    className="flex-grow px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
+                    className={`flex-grow px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 ${errors.imagem_url ? 'ring-2 ring-error' : ''}`}
                   />
                   <label className="cursor-pointer p-2.5 bg-primary/10 text-primary rounded-xl hover:bg-primary/20 transition-all flex items-center justify-center min-w-[44px]">
                     {uploading ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
@@ -451,10 +417,11 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
                     />
                   </label>
                 </div>
-                {imagemUrl && (
+                {errors.imagem_url && <p className="text-xs text-error mt-1">{errors.imagem_url.message}</p>}
+                {formValues.imagem_url && (
                   <div className="mt-2 aspect-video w-full rounded-xl overflow-hidden border border-surface-container-high relative group">
                     <img 
-                      src={imagemUrl || DEFAULT_PRODUCT_IMAGE} 
+                      src={formValues.imagem_url || DEFAULT_PRODUCT_IMAGE} 
                       alt="Preview" 
                       className="w-full h-full object-cover"
                       referrerPolicy="no-referrer"
@@ -464,7 +431,7 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
                     />
                     <button 
                       type="button"
-                      onClick={() => setImagemUrl('')}
+                      onClick={() => setValue('imagem_url', '')}
                       className="absolute top-2 right-2 p-1.5 bg-black/50 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
                     >
                       <X size={14} />
@@ -477,8 +444,7 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
                 <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Modo de Preparo</label>
                 <textarea 
                   rows={4}
-                  value={modoPreparo}
-                  onChange={e => setModoPreparo(e.target.value)}
+                  {...register('modo_preparo')}
                   placeholder="Descreva o passo a passo da produção..."
                   className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 resize-none"
                 />
@@ -510,14 +476,6 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
                     <span className="text-sm font-bold text-primary">{formatCurrency(currentUnitCost)}</span>
                   </div>
                 </div>
-                {(!productToEditState?.ingredientes || productToEditState.ingredientes.length === 0) && productToEditState?.id && (
-                  <p className="text-[9px] text-error font-medium mt-2 italic flex items-center gap-1">
-                    <AlertTriangle size={10} /> Produtos sem ingredientes não calculam custo corretamente.
-                  </p>
-                )}
-                {!produto?.id && (
-                  <p className="text-[10px] text-on-surface-variant mt-2 italic">Salve o produto primeiro para adicionar ingredientes.</p>
-                )}
               </div>
             </div>
 
@@ -531,45 +489,57 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] font-bold text-on-surface-variant uppercase">Manual</span>
-                      <button 
-                        type="button"
-                        onClick={() => {
-                          if (!usarPrecoManual && precoVendaManual === 0) {
-                            setPrecoVendaManual(precoVendaFinal);
-                          }
-                          setUsarPrecoManual(!usarPrecoManual);
-                        }}
-                        className={`w-10 h-5 rounded-full relative transition-all ${usarPrecoManual ? 'bg-primary' : 'bg-surface-container-highest'}`}
-                      >
-                        <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${usarPrecoManual ? 'left-6' : 'left-1'}`}></div>
-                      </button>
+                      <Controller
+                        name="usar_preco_manual"
+                        control={control}
+                        render={({ field }) => (
+                           <button 
+                            type="button"
+                            onClick={() => {
+                              if (!field.value && formValues.preco_venda_manual === 0) {
+                                setValue('preco_venda_manual', precoVendaFinal);
+                              }
+                              field.onChange(!field.value);
+                            }}
+                            className={`w-10 h-5 rounded-full relative transition-all ${field.value ? 'bg-primary' : 'bg-surface-container-highest'}`}
+                          >
+                            <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${field.value ? 'left-6' : 'left-1'}`}></div>
+                          </button>
+                        )}
+                      />
                     </div>
-                    {!usarPrecoManual && (
+                    {!formValues.usar_preco_manual && (
                       <div className="flex items-center gap-2">
                         <span className="text-[10px] font-bold text-on-surface-variant uppercase">Margem Categoria</span>
-                        <button 
-                          type="button"
-                          onClick={() => setUsarMargemCategoria(!usarMargemCategoria)}
-                          className={`w-10 h-5 rounded-full relative transition-all ${usarMargemCategoria ? 'bg-primary' : 'bg-surface-container-highest'}`}
-                        >
-                          <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${usarMargemCategoria ? 'left-6' : 'left-1'}`}></div>
-                        </button>
+                        <Controller
+                          name="usar_margem_categoria"
+                          control={control}
+                          render={({ field }) => (
+                            <button 
+                              type="button"
+                              onClick={() => field.onChange(!field.value)}
+                              className={`w-10 h-5 rounded-full relative transition-all ${field.value ? 'bg-primary' : 'bg-surface-container-highest'}`}
+                            >
+                              <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${field.value ? 'left-6' : 'left-1'}`}></div>
+                            </button>
+                          )}
+                        />
                       </div>
                     )}
                   </div>
                 </div>
 
-                {usarPrecoManual ? (
+                {formValues.usar_preco_manual ? (
                   <div className="space-y-4 animate-in fade-in duration-300">
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Preço de Venda Manual</label>
                       <input 
                         type="number"
                         step="0.01"
-                        value={precoVendaManual}
-                        onChange={e => setPrecoVendaManual(Number(e.target.value))}
-                        className="w-full px-4 py-2.5 bg-surface-container-lowest border-none rounded-xl text-lg font-bold text-primary focus:ring-2 focus:ring-primary/20"
+                        {...register('preco_venda_manual', { valueAsNumber: true })}
+                        className={`w-full px-4 py-2.5 bg-surface-container-lowest border-none rounded-xl text-lg font-bold text-primary focus:ring-2 focus:ring-primary/20 ${errors.preco_venda_manual ? 'ring-2 ring-error' : ''}`}
                       />
+                      {errors.preco_venda_manual && <p className="text-xs text-error mt-1">{errors.preco_venda_manual.message}</p>}
                     </div>
                   </div>
                 ) : (
@@ -578,10 +548,9 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
                       <div className="space-y-1.5">
                         <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Tipo de Margem</label>
                         <select 
-                          disabled={usarMargemCategoria}
-                          value={activeMargin.tipo}
-                          onChange={e => setMargemTipo(e.target.value as any)}
-                          className={`w-full px-4 py-2.5 bg-surface-container-lowest border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 ${usarMargemCategoria ? 'opacity-60 cursor-not-allowed' : ''}`}
+                          disabled={formValues.usar_margem_categoria}
+                          {...register('margem_tipo')}
+                          className={`w-full px-4 py-2.5 bg-surface-container-lowest border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 ${formValues.usar_margem_categoria ? 'opacity-60 cursor-not-allowed' : ''}`}
                         >
                           <option value="markup">Markup</option>
                           <option value="margem_real">Margem Real</option>
@@ -590,15 +559,15 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
                       <div className="space-y-1.5">
                         <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Margem (%)</label>
                         <input 
-                          disabled={usarMargemCategoria}
+                          disabled={formValues.usar_margem_categoria}
                           type="number"
-                          value={activeMargin.margem}
-                          onChange={e => setMargemPercentual(Number(e.target.value))}
-                          className={`w-full px-4 py-2.5 bg-surface-container-lowest border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 ${usarMargemCategoria ? 'opacity-60 cursor-not-allowed' : ''}`}
+                          step="any"
+                          {...register('margem_percentual', { valueAsNumber: true })}
+                          className={`w-full px-4 py-2.5 bg-surface-container-lowest border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 ${formValues.usar_margem_categoria ? 'opacity-60 cursor-not-allowed' : ''}`}
                         />
                       </div>
                     </div>
-                    {usarMargemCategoria && selectedCategoria && (
+                    {formValues.usar_margem_categoria && selectedCategoria && (
                       <p className="text-[10px] text-primary italic">
                         Usando margem padrão da categoria "{selectedCategoria.nome}"
                       </p>
@@ -618,9 +587,6 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
                     {margemRealCalculada <= 0 && (
                       <p className="text-[9px] text-error font-bold mt-1">⚠️ Prejuízo detectado!</p>
                     )}
-                    <p className="text-[9px] text-on-surface-variant italic mt-1 max-w-[180px]">
-                      Lucro da empresa após descontar todos os custos, inclusive seu salário.
-                    </p>
                   </div>
                   <div className="text-right">
                     <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block mb-1">Preço Final</span>
@@ -636,7 +602,7 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
 
         <div className="p-6 border-t border-surface-container-high bg-surface-container-low/50 flex justify-between items-center gap-3">
           <div>
-            {produto?.id && onDelete && (
+            {productToEditState?.id && onDelete && (
               <div className="flex items-center gap-2">
                 {confirmDelete ? (
                   <div className="flex items-center gap-2 animate-in fade-in slide-in-from-left-2 duration-200">
@@ -672,16 +638,19 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
           <div className="flex gap-3">
             <button 
               type="button"
+              disabled={isSubmitting}
               onClick={onClose}
-              className="px-8 py-3 bg-surface-container-high text-on-surface font-bold rounded-2xl hover:bg-surface-container-highest transition-all"
+              className="px-8 py-3 bg-surface-container-high text-on-surface font-bold rounded-2xl hover:bg-surface-container-highest transition-all disabled:opacity-50"
             >
               Cancelar
             </button>
             <button 
-              onClick={handleSubmit}
-              className="flex items-center gap-2 px-12 py-3 bg-primary text-white font-bold rounded-2xl hover:bg-primary/90 transition-all shadow-xl shadow-primary/20"
+              disabled={isSubmitting}
+              onClick={handleSubmit(onFormSubmit)}
+              className="flex items-center gap-2 px-12 py-3 bg-primary text-white font-bold rounded-2xl hover:bg-primary/90 transition-all shadow-xl shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Save size={18} /> Salvar Produto
+              {isSubmitting ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+              Salvar Produto
             </button>
           </div>
         </div>
@@ -691,19 +660,22 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
         <FichaTecnica 
           product={{
             ...productToEditState,
-            margem_percentual: margemPercentual,
-            margem_tipo: margemTipo,
-            usar_preco_manual: usarPrecoManual,
-            preco_venda_manual: precoVendaManual,
-            rendimento_unidades: rendimentoUnidades
+            ...formValues,
+            margem_percentual: formValues.margem_percentual,
+            margem_tipo: formValues.margem_tipo as TipoMargem,
+            usar_preco_manual: formValues.usar_preco_manual,
+            preco_venda_manual: formValues.preco_venda_manual,
+            rendimento_unidades: formValues.rendimento_unidades || 1
           }}
           onClose={() => setShowFichaTecnica(false)}
           onUpdate={() => {
-            // Recalculate cost when ingredients change
             const fetchNewCost = async () => {
               try {
                 const data = await dataService.getProdutoById(productToEditState.id);
-                if (data) setCustoInsumos(data.custo_total - laborCost - fixedCost);
+                if (data) {
+                  // laborCost and fixedCost are derived from form and state
+                  setCustoInsumos(data.custo_total - laborCost - fixedCost);
+                }
                 fetchIngredientsCost();
               } catch (error) {
                 console.error('Erro ao atualizar custo após mudança na ficha técnica:', error);

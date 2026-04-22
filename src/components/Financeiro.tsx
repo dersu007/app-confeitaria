@@ -1,22 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { DatabaseGrid, EditableCell } from './DatabaseGrid';
 import { createColumnHelper } from '@tanstack/react-table';
 import { CreditCard, TrendingDown, TrendingUp, DollarSign, Download, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { dataService } from '../services/dataService';
+import { useDespesasFixas, useRecalculateEverything } from '../hooks/useQueries';
 import { formatCurrency } from '../services/bakeryService';
 import { exportToCSV } from '../utils/csvUtils';
 
-const columnHelper = createColumnHelper<any>();
+import { DespesaFixa } from '../types';
+
+const columnHelper = createColumnHelper<DespesaFixa>();
 
 export const Financeiro = () => {
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [totalExpenses, setTotalExpenses] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const { data: despesas = [] } = useDespesasFixas();
+  const recalculateEverythingMutation = useRecalculateEverything();
   const [isExporting, setIsExporting] = useState(false);
-  const [isRecalculating, setIsRecalculating] = useState(false);
-
-  const refresh = () => setRefreshKey(prev => prev + 1);
+  const totalExpenses = despesas.reduce((acc, curr) => acc + (Number(curr.valor_mensal) || 0), 0);
 
   const handleExportCSV = async () => {
     setIsExporting(true);
@@ -39,7 +39,7 @@ export const Financeiro = () => {
         'despesas_fixas_completo'
       );
       if (success) toast.success('Relatório de despesas fixas exportado!');
-    } catch (error) {
+    } catch {
       toast.error('Erro ao exportar CSV');
     } finally {
       setIsExporting(false);
@@ -47,35 +47,7 @@ export const Financeiro = () => {
   };
 
   const handleRecalculate = async () => {
-    setIsRecalculating(true);
-    const loadingToast = toast.loading('Sincronizando toda a base financeira...');
-    try {
-      await dataService.recalculateEverything();
-      refresh();
-      toast.success('Base financeira atualizada com sucesso!', { id: loadingToast });
-    } catch (error) {
-      console.error('Erro ao recalcular:', error);
-      toast.error('Erro ao recalcular base', { id: loadingToast });
-    } finally {
-      setIsRecalculating(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchSummary();
-  }, [refreshKey]);
-
-  const fetchSummary = async () => {
-    setLoading(true);
-    try {
-      const expenses = await dataService.getDespesasFixas();
-      const total = expenses.reduce((acc, curr) => acc + (Number(curr.valor_mensal) || 0), 0);
-      setTotalExpenses(total);
-    } catch (error) {
-      console.error('Erro ao buscar resumo financeiro:', error);
-    } finally {
-      setLoading(false);
-    }
+    recalculateEverythingMutation.mutate();
   };
 
   const expenseColumns = [
@@ -96,11 +68,11 @@ export const Financeiro = () => {
         <div className="flex gap-3">
           <button 
             onClick={handleRecalculate}
-            disabled={isRecalculating}
+            disabled={recalculateEverythingMutation.isPending}
             className="flex items-center gap-2 bg-surface-container-low text-primary px-4 py-3 rounded-xl font-bold border border-primary/20 hover:bg-primary/5 transition-all text-sm disabled:opacity-50"
             title="Recalcula todos os custos e sincroniza a base"
           >
-            <RefreshCw size={18} className={isRecalculating ? 'animate-spin' : ''} /> Recalcular Tudo
+            <RefreshCw size={18} className={recalculateEverythingMutation.isPending ? 'animate-spin' : ''} /> Recalcular Tudo
           </button>
           <button 
             onClick={handleExportCSV}
@@ -152,8 +124,7 @@ export const Financeiro = () => {
           table="despesas_fixas" 
           title="Despesas Fixas Mensais" 
           columns={expenseColumns} 
-          onDataChange={refresh} 
-          refreshKey={refreshKey} 
+          onDataChange={handleRecalculate} 
         />
       </div>
     </div>

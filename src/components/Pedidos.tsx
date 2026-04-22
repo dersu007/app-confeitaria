@@ -1,35 +1,33 @@
-import React, { useState, useEffect } from 'react';
-import { dataService } from '../services/dataService';
-import { Pedido, Cliente } from '../types';
+import React, { useState } from 'react';
+import { Pedido } from '../types';
 import { 
   ShoppingBag, 
   Plus, 
   Search, 
-  Filter, 
   LayoutGrid, 
   List, 
   Download, 
   RefreshCw,
-  MoreHorizontal,
   ChevronRight,
-  Clock,
   Package,
-  AlertCircle,
-  Calendar as CalendarIcon
+  Calendar as CalendarIcon,
+  Loader2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { formatCurrency } from '../services/bakeryService';
 import { format, parseISO } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
 import { KanbanBoard } from './Orders/KanbanBoard';
 import { OrderModal } from './Orders/OrderModal';
 import { OrderDetails } from './Orders/OrderDetails';
 import { CalendarView } from './Orders/CalendarView';
 import { exportToCSV } from '../utils/csvUtils';
+import { usePedidos, useUpdatePedidoStatus, useRecalculateEverything } from '../hooks/useQueries';
 
 export const Pedidos = () => {
-  const [pedidos, setPedidos] = useState<Pedido[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: pedidos = [], isLoading: loading } = usePedidos();
+  const updateStatusMutation = useUpdatePedidoStatus();
+  const recalculateEverythingMutation = useRecalculateEverything();
+
   const [viewMode, setViewMode] = useState<'kanban' | 'list' | 'calendar'>('kanban');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('Todos');
@@ -37,12 +35,7 @@ export const Pedidos = () => {
   const [showModal, setShowModal] = useState(false);
   const [selectedPedido, setSelectedPedido] = useState<Pedido | null>(null);
   const [showDetails, setShowDetails] = useState(false);
-  const [isRecalculating, setIsRecalculating] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-
-  useEffect(() => {
-    fetchPedidos();
-  }, []);
 
   const handleExportCSV = () => {
     setIsExporting(true);
@@ -73,49 +66,20 @@ export const Pedidos = () => {
         'pedidos_completo'
       );
       if (success) toast.success('Relatório completo de pedidos exportado!');
-    } catch (error) {
+    } catch (error: unknown) {
+      console.error('Erro ao exportar CSV:', error);
       toast.error('Erro ao exportar CSV');
     } finally {
       setIsExporting(false);
     }
   };
 
-  const fetchPedidos = async () => {
-    setLoading(true);
-    try {
-      const data = await dataService.getPedidos();
-      setPedidos(data);
-    } catch (error) {
-      console.error('Erro ao carregar pedidos:', error);
-      toast.error('Erro ao carregar pedidos');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleRecalculate = async () => {
-    setIsRecalculating(true);
-    const loadingToast = toast.loading('Recalculando toda a base de dados...');
-    try {
-      await dataService.recalculateEverything();
-      await fetchPedidos();
-      toast.success('Recálculo completo: Produtos e LTV atualizados!', { id: loadingToast });
-    } catch (error) {
-      console.error('Erro ao recalcular:', error);
-      toast.error('Ocorreu um erro ao recalcular a base.', { id: loadingToast });
-    } finally {
-      setIsRecalculating(false);
-    }
+    recalculateEverythingMutation.mutate();
   };
 
   const handleStatusChange = async (pedidoId: string, newStatus: Pedido['status']) => {
-    try {
-      await dataService.updatePedidoStatus(pedidoId, newStatus);
-      setPedidos(prev => prev.map(p => p.id === pedidoId ? { ...p, status: newStatus } : p));
-      toast.success(`Pedido movido para ${newStatus}`);
-    } catch (error) {
-      toast.error('Erro ao atualizar status');
-    }
+    updateStatusMutation.mutate({ pedidoId, status: newStatus });
   };
 
   const filteredPedidos = pedidos.filter(p => {
@@ -125,7 +89,7 @@ export const Pedidos = () => {
     return matchesSearch && matchesStatus;
   });
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (status: Pedido['status']) => {
     switch (status) {
       case 'Em preparação': return 'bg-amber-100 text-amber-700 border-amber-200';
       case 'Pronto': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
@@ -209,12 +173,12 @@ export const Pedidos = () => {
         <div className="flex gap-2 ml-auto">
           <button 
             onClick={handleRecalculate}
-            disabled={isRecalculating}
+            disabled={recalculateEverythingMutation.isPending}
             className="flex items-center gap-2 px-4 py-2.5 bg-surface-container-low text-primary font-bold rounded-xl border border-primary/20 hover:bg-primary/5 transition-all text-xs disabled:opacity-50"
             title="Sincroniza custos de produtos e métricas de clientes"
           >
-            <RefreshCw size={16} className={isRecalculating ? 'animate-spin' : ''} />
-            <span className="hidden sm:inline">Recalcular Tudo</span>
+            <RefreshCw size={16} className={recalculateEverythingMutation.isPending ? 'animate-spin' : ''} />
+            <span className="hidden sm:inline">{recalculateEverythingMutation.isPending ? 'Recalculando...' : 'Recalcular Tudo'}</span>
           </button>
         </div>
       </div>
@@ -223,7 +187,7 @@ export const Pedidos = () => {
       <div className="flex-grow overflow-hidden">
         {loading ? (
           <div className="h-full flex flex-col items-center justify-center gap-4 text-on-surface-variant">
-            <RefreshCw size={48} className="animate-spin opacity-20" />
+            <Loader2 size={48} className="animate-spin opacity-20" />
             <p className="text-sm font-medium">Carregando seus pedidos...</p>
           </div>
         ) : viewMode === 'kanban' ? (
@@ -317,7 +281,7 @@ export const Pedidos = () => {
         <OrderModal 
           pedido={selectedPedido} 
           onClose={() => setShowModal(false)} 
-          onSave={() => { fetchPedidos(); setShowModal(false); }} 
+          onSave={() => { setShowModal(false); }} 
         />
       )}
 
@@ -326,7 +290,7 @@ export const Pedidos = () => {
           pedido={selectedPedido} 
           onClose={() => setShowDetails(false)} 
           onEdit={() => { setShowDetails(false); setShowModal(true); }} 
-          onDelete={fetchPedidos}
+          onDelete={() => { setShowDetails(false); }}
         />
       )}
     </div>

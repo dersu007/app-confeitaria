@@ -4,7 +4,6 @@ import {
   LayoutDashboard, 
   Cake, 
   ShoppingCart, 
-  BookOpen, 
   CreditCard, 
   Users, 
   Sparkles, 
@@ -16,7 +15,6 @@ import {
   Bell,
   History,
   LogOut,
-  RefreshCw,
   AlertTriangle,
   ExternalLink,
   ChevronRight
@@ -24,11 +22,14 @@ import {
 import { toast } from 'react-hot-toast';
 import { useAuth } from '../lib/auth';
 import { dataService } from '../services/dataService';
-import { cacheService } from '../services/cacheService';
 import { validateProductIntegrity } from '../services/bakeryService';
-import { Ingrediente, Produto } from '../types';
+import { useQueryClient } from '@tanstack/react-query';
+import { Produto } from '../types';
+import { ErrorBoundary } from 'react-error-boundary';
+import { ErrorFallback } from './ui/ErrorFallback';
+import { logErrorToBackend } from '../utils/errorUtils';
 
-const SidebarLink = ({ to, icon: Icon, children }: { to: string, icon: any, children: React.ReactNode }) => (
+const SidebarLink = ({ to, icon: Icon, children }: { to: string, icon: React.ElementType, children: React.ReactNode }) => (
   <NavLink 
     to={to}
     className={({ isActive }) => `
@@ -46,13 +47,14 @@ const SidebarLink = ({ to, icon: Icon, children }: { to: string, icon: any, chil
 export const Layout = () => {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [criticalStockCount, setCriticalStockCount] = React.useState(0);
   const [openOrdersCount, setOpenOrdersCount] = React.useState(0);
   const [integrityIssues, setIntegrityIssues] = React.useState<{product: Produto, errors: string[]}[]>([]);
   const [isRecalculating, setIsRecalculating] = React.useState(false);
   const [showNotifications, setShowNotifications] = React.useState(false);
 
-  const fetchNotificationData = async () => {
+  const fetchNotificationData = React.useCallback(async () => {
     try {
       const [ingredients, products, orders] = await Promise.all([
         dataService.getIngredientes(),
@@ -77,14 +79,14 @@ export const Layout = () => {
     } catch (err) {
       console.error('Erro ao buscar dados de notificação:', err);
     }
-  };
+  }, []);
 
   React.useEffect(() => {
-    fetchNotificationData();
+    Promise.resolve().then(() => fetchNotificationData());
     // Refresh every 5 minutes
-    const interval = setInterval(fetchNotificationData, 5 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, []);
+    const interval = window.setInterval(fetchNotificationData, 5 * 60 * 1000);
+    return () => window.clearInterval(interval);
+  }, [fetchNotificationData]);
 
   const handleGlobalRecalculate = async () => {
     if (isRecalculating) return;
@@ -102,20 +104,19 @@ export const Layout = () => {
 
     try {
       // Usar recalculateEverything para garantir que clientes também sejam atualizados se necessário
-      // Mas o usuário pediu especificamente recalculateAllProducts. Vou usar recalculateAllProducts
-      // para ser fiel ao pedido, mas garantindo que ele seja visível.
-      await dataService.recalculateAllProducts();
+      await dataService.recalculateEverything();
       
-      // Invalida todos os caches para garantir que as telas mostrem dados novos
-      cacheService.invalidateCache();
+      // Invalida todos os caches do React Query
+      queryClient.invalidateQueries();
       
       // Atualiza os contadores das notificações
       await fetchNotificationData();
       
       toast.success('Sincronização concluída com sucesso! ✨', { id: loadingToast });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Erro no recálculo global:', error);
-      toast.error(`Falha na sincronização: ${error.message}`, { id: loadingToast });
+      const message = error instanceof Error ? error.message : 'Erro desconhecido';
+      toast.error(`Falha na sincronização: ${message}`, { id: loadingToast });
     } finally {
       setIsRecalculating(false);
     }
@@ -126,7 +127,7 @@ export const Layout = () => {
       await signOut();
       toast.success('Sessão encerrada');
       navigate('/login');
-    } catch (error) {
+    } catch {
       toast.error('Erro ao sair');
     }
   };
@@ -146,6 +147,7 @@ export const Layout = () => {
           <SidebarLink to="/pedidos" icon={ShoppingCart}>Pedidos</SidebarLink>
           <SidebarLink to="/produtos" icon={Cake}>Produtos</SidebarLink>
           <SidebarLink to="/insumos" icon={Database}>Insumos</SidebarLink>
+          <SidebarLink to="/estoque" icon={History}>Estoque</SidebarLink>
           <SidebarLink to="/categorias" icon={Tags}>Categorias</SidebarLink>
           <SidebarLink to="/financeiro" icon={CreditCard}>Financeiro</SidebarLink>
           <SidebarLink to="/clientes" icon={Users}>Clientes</SidebarLink>
@@ -336,7 +338,16 @@ export const Layout = () => {
 
         {/* Page Content */}
         <div className="pt-24 px-8 pb-12">
-          <Outlet />
+          <ErrorBoundary
+            FallbackComponent={ErrorFallback}
+            onReset={() => {
+              // Reset any state that might have caused the error
+              queryClient.invalidateQueries();
+            }}
+            onError={logErrorToBackend}
+          >
+            <Outlet />
+          </ErrorBoundary>
         </div>
       </main>
     </div>

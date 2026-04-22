@@ -1,14 +1,16 @@
 import { supabase } from '../lib/supabase';
-import { cacheService } from './cacheService';
 import { 
   Ingrediente, 
   Produto, 
   ProdutoIngrediente, 
   Categoria, 
   Pedido, 
+  PedidoItem,
+  PedidoExtra,
   DespesaFixa,
   Cliente,
-  CategoriaExtra
+  CategoriaExtra,
+  MovimentacaoEstoque
 } from '../types';
 import { 
   calculateRecipeIngredientCost,
@@ -21,8 +23,6 @@ import {
 import { DEFAULT_CUSTO_HORA } from '../constants';
 
 class DataService {
-  // ... existing code ...
-  
   // --- Recalculation Methods ---
   async recalculateProduct(productId: string): Promise<Produto | null> {
     try {
@@ -84,7 +84,7 @@ class DataService {
       const unitCost = calculateUnitCost(fullTotalCost, product.rendimento_unidades);
 
       // 6. Calcular preco_venda_final e margem_real_calculada
-      const activeMargin = resolveProductMargin(product, (product as any).categoria);
+      const activeMargin = resolveProductMargin(product, product.categoria);
       
       const { precoVendaFinal, margemRealCalculada } = calculateProductPricing(
         unitCost,
@@ -107,8 +107,6 @@ class DataService {
         custo_unitario: unitCost,
         preco_venda_final: precoVendaFinal,
         margem_real_calculada: margemRealCalculada,
-        custo_total_calculado: totalCost,
-        custo_unitario_snapshot: unitCost
       });
 
       return await this.saveProduto(updateData);
@@ -142,13 +140,19 @@ class DataService {
     
     if (ordersError) throw ordersError;
 
+    interface ClienteStats {
+      total_pedidos: number;
+      valor_total_gasto: number;
+      ultima_compra: string | null;
+    }
+
     // Process stats in memory
-    const statsMap = (clients || []).reduce((acc: any, c: any) => {
+    const statsMap = (clients || []).reduce((acc: Record<string, ClienteStats>, c: { id: string }) => {
       acc[c.id] = { total_pedidos: 0, valor_total_gasto: 0, ultima_compra: null };
       return acc;
     }, {});
 
-    (orders || []).forEach((o: any) => {
+    (orders || []).forEach((o: { cliente_id: string, valor_total: number, data_pedido: string }) => {
       if (statsMap[o.cliente_id]) {
         statsMap[o.cliente_id].total_pedidos += 1;
         statsMap[o.cliente_id].valor_total_gasto += o.valor_total;
@@ -166,10 +170,6 @@ class DataService {
     );
 
     await Promise.all(updates);
-
-    cacheService.invalidateCache('pedidos');
-    cacheService.invalidateCache('clientes');
-    cacheService.invalidateCache('produtos');
   }
 
   async recalculateProductsUsingIngredient(ingredientId: string): Promise<void> {
@@ -180,31 +180,21 @@ class DataService {
       
     if (!recipeItems) return;
 
-    const productIds = Array.from(new Set(recipeItems.map((item: any) => item.produto_id)));
+    const productIds = Array.from(new Set(recipeItems.map((item: { produto_id: string }) => item.produto_id)));
     
     for (const productId of productIds) {
       await this.recalculateProduct(productId as string);
     }
   }
-  private async getWithCache<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
-    const cached = cacheService.getCache<T>(key);
-    if (cached) return cached;
-
-    const data = await fetcher();
-    cacheService.setCache(key, data);
-    return data;
-  }
 
   // --- Ingredientes ---
   async getIngredientes(): Promise<Ingrediente[]> {
-    return this.getWithCache('ingredientes', async () => {
-      const { data, error } = await supabase
-        .from('ingredientes')
-        .select('*')
-        .order('nome');
-      if (error) throw error;
-      return data || [];
-    });
+    const { data, error } = await supabase
+      .from('ingredientes')
+      .select('*, categoria:categorias(*)')
+      .order('nome');
+    if (error) throw error;
+    return data || [];
   }
 
   async saveIngrediente(ingrediente: Partial<Ingrediente>): Promise<Ingrediente> {
@@ -216,31 +206,23 @@ class DataService {
     }
 
     const { data, error } = await query.select().single();
-    
     if (error) throw error;
-    cacheService.invalidateCache('ingredientes');
-    // Also invalidate products because their costs might change
-    cacheService.invalidateCache('produtos');
     return data;
   }
 
   async deleteIngrediente(id: string): Promise<void> {
     const { error } = await supabase.from('ingredientes').delete().eq('id', id);
     if (error) throw error;
-    cacheService.invalidateCache('ingredientes');
-    cacheService.invalidateCache('produtos');
   }
 
   // --- Produtos ---
   async getProdutos(): Promise<Produto[]> {
-    return this.getWithCache('produtos', async () => {
-      const { data, error } = await supabase
-        .from('produtos')
-        .select('*, categoria:categorias!categoria_id(*), ingredientes:produto_ingredientes(*)')
-        .order('nome');
-      if (error) throw error;
-      return data || [];
-    });
+    const { data, error } = await supabase
+      .from('produtos')
+      .select('*, categoria:categorias!categoria_id(*), ingredientes:produto_ingredientes(*)')
+      .order('nome');
+    if (error) throw error;
+    return data || [];
   }
 
   async duplicateProduct(productId: string): Promise<Produto> {
@@ -250,7 +232,7 @@ class DataService {
       if (!original) throw new Error('Produto original não encontrado');
 
       // 2. Prepare new product object (removing ID and changing name)
-      const { id, created_at, ingredientes, categoria, ...rest } = original as any;
+      const { id: _id, ingredientes: _ing, categoria: _cat, ...rest } = original;
       const duplicatedProduct: Partial<Produto> = {
         ...rest,
         nome: `${original.nome} (Cópia)`,
@@ -261,7 +243,7 @@ class DataService {
       
       // 4. Duplicate the recipe (technical sheet)
       if (original.ingredientes && original.ingredientes.length > 0) {
-        const duplicatedRecipe = original.ingredientes.map((item: any) => ({
+        const duplicatedRecipe = original.ingredientes.map((item) => ({
           produto_id: newProduct.id,
           ingrediente_id: item.ingrediente_id,
           quantidade: item.quantidade,
@@ -272,10 +254,6 @@ class DataService {
         await this.insertEntities('produto_ingredientes', duplicatedRecipe);
       }
 
-      // Invalidate caches
-      cacheService.invalidateCache('produtos');
-      cacheService.invalidateCache(`produto:${newProduct.id}`);
-
       return newProduct;
     } catch (err) {
       console.error('Erro ao duplicar produto:', err);
@@ -284,15 +262,13 @@ class DataService {
   }
 
   async getProdutoById(id: string): Promise<Produto> {
-    return this.getWithCache(`produto:${id}`, async () => {
-      const { data, error } = await supabase
-        .from('produtos')
-        .select('*, categoria:categorias!categoria_id(*), ingredientes:produto_ingredientes(*, ingrediente:ingredientes(*))')
-        .eq('id', id)
-        .single();
-      if (error) throw error;
-      return data;
-    });
+    const { data, error } = await supabase
+      .from('produtos')
+      .select('*, categoria:categorias!categoria_id(*), ingredientes:produto_ingredientes(*, ingrediente:ingredientes(*))')
+      .eq('id', id)
+      .single();
+    if (error) throw error;
+    return data;
   }
 
   async saveProduto(produto: Partial<Produto>): Promise<Produto> {
@@ -300,18 +276,13 @@ class DataService {
     
     let query;
     if (sanitized.id) {
-      // Use update for existing records to support partial updates
       query = supabase.from('produtos').update(sanitized).eq('id', sanitized.id);
     } else {
-      // Use insert for new records
       query = supabase.from('produtos').insert(sanitized);
     }
 
     const { data, error } = await query.select().single();
-    
     if (error) throw error;
-    cacheService.invalidateCache('produtos');
-    cacheService.invalidateCache(`produto:${data.id}`);
     return data;
   }
 
@@ -348,22 +319,16 @@ class DataService {
       console.error('Erro ao excluir produto:', error);
       throw error;
     }
-    
-    cacheService.invalidateCache('produtos');
-    cacheService.invalidateCache(`produto:${id}`);
-    cacheService.invalidateCache(`produto_ingredientes:${id}`);
   }
 
   // --- Produto Ingredientes (Ficha Técnica) ---
   async getProdutoIngredientes(produtoId: string): Promise<ProdutoIngrediente[]> {
-    return this.getWithCache(`produto_ingredientes:${produtoId}`, async () => {
-      const { data, error } = await supabase
-        .from('produto_ingredientes')
-        .select('*, ingrediente:ingredientes(*)')
-        .eq('produto_id', produtoId);
-      if (error) throw error;
-      return data || [];
-    });
+    const { data, error } = await supabase
+      .from('produto_ingredientes')
+      .select('*, ingrediente:ingredientes(*)')
+      .eq('produto_id', produtoId);
+    if (error) throw error;
+    return data || [];
   }
 
   async saveProdutoIngrediente(item: Partial<ProdutoIngrediente>): Promise<ProdutoIngrediente> {
@@ -375,32 +340,23 @@ class DataService {
     }
 
     const { data, error } = await query.select().single();
-    
     if (error) throw error;
-    cacheService.invalidateCache(`produto_ingredientes:${item.produto_id}`);
-    cacheService.invalidateCache('produtos');
-    cacheService.invalidateCache(`produto:${item.produto_id}`);
     return data;
   }
 
-  async deleteProdutoIngrediente(id: string, produtoId: string): Promise<void> {
+  async deleteProdutoIngrediente(id: string, _produtoId: string): Promise<void> {
     const { error } = await supabase.from('produto_ingredientes').delete().eq('id', id);
     if (error) throw error;
-    cacheService.invalidateCache(`produto_ingredientes:${produtoId}`);
-    cacheService.invalidateCache('produtos');
-    cacheService.invalidateCache(`produto:${produtoId}`);
   }
 
   // --- Categorias ---
   async getCategorias(): Promise<Categoria[]> {
-    return this.getWithCache('categorias', async () => {
-      const { data, error } = await supabase
-        .from('categorias')
-        .select('*')
-        .order('nome');
-      if (error) throw error;
-      return data || [];
-    });
+    const { data, error } = await supabase
+      .from('categorias')
+      .select('*')
+      .order('nome');
+    if (error) throw error;
+    return data || [];
   }
 
   async saveCategoria(categoria: Partial<Categoria>): Promise<Categoria> {
@@ -412,28 +368,23 @@ class DataService {
     }
 
     const { data, error } = await query.select().single();
-    
     if (error) throw error;
-    cacheService.invalidateCache('categorias');
-    cacheService.invalidateCache('produtos'); // Products might use category margin
     return data;
   }
 
   // --- Pedidos ---
   async getPedidos(): Promise<Pedido[]> {
-    return this.getWithCache('pedidos', async () => {
-      const { data, error } = await supabase
-        .from('pedidos')
-        .select(`
-          *,
-          cliente:clientes(*),
-          itens:pedidos_itens(*, produto:produtos(*, categoria:categorias!categoria_id(*))),
-          extras:pedidos_extras(*)
-        `)
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data || [];
-    });
+    const { data, error } = await supabase
+      .from('pedidos')
+      .select(`
+        *,
+        cliente:clientes(*),
+        itens:pedidos_itens(*, produto:produtos(*, categoria:categorias!categoria_id(*))),
+        extras:pedidos_extras(*)
+      `)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
   }
 
   async updatePedidoStatus(pedidoId: string, status: Pedido['status']): Promise<void> {
@@ -443,8 +394,6 @@ class DataService {
       .eq('id', pedidoId);
     
     if (error) throw error;
-    cacheService.invalidateCache('pedidos');
-    cacheService.invalidateCache('clientes');
   }
 
   async savePedido(pedido: Partial<Pedido>): Promise<Pedido> {
@@ -456,23 +405,18 @@ class DataService {
     }
 
     const { data, error } = await query.select().single();
-    
     if (error) throw error;
-    cacheService.invalidateCache('pedidos');
-    cacheService.invalidateCache('clientes');
     return data;
   }
 
   // --- Despesas Fixas ---
   async getDespesasFixas(): Promise<DespesaFixa[]> {
-    return this.getWithCache('despesas_fixas', async () => {
-      const { data, error } = await supabase
-        .from('despesas_fixas')
-        .select('*')
-        .order('descricao');
-      if (error) throw error;
-      return data || [];
-    });
+    const { data, error } = await supabase
+      .from('despesas_fixas')
+      .select('*')
+      .order('descricao');
+    if (error) throw error;
+    return data || [];
   }
 
   async saveDespesaFixa(despesa: Partial<DespesaFixa>): Promise<DespesaFixa> {
@@ -484,22 +428,18 @@ class DataService {
     }
 
     const { data, error } = await query.select().single();
-    
     if (error) throw error;
-    cacheService.invalidateCache('despesas_fixas');
     return data;
   }
 
   // --- Clientes ---
   async getClientes(): Promise<Cliente[]> {
-    return this.getWithCache('clientes', async () => {
-      const { data, error } = await supabase
-        .from('clientes')
-        .select('*')
-        .order('nome');
-      if (error) throw error;
-      return data || [];
-    });
+    const { data, error } = await supabase
+      .from('clientes')
+      .select('*')
+      .order('nome');
+    if (error) throw error;
+    return data || [];
   }
 
   async saveCliente(cliente: Partial<Cliente>): Promise<Cliente> {
@@ -511,9 +451,7 @@ class DataService {
     }
 
     const { data, error } = await query.select().single();
-    
     if (error) throw error;
-    cacheService.invalidateCache('clientes');
     return data;
   }
 
@@ -539,33 +477,27 @@ class DataService {
       console.error('Erro ao excluir cliente:', error);
       throw error;
     }
-    
-    cacheService.invalidateCache('clientes');
   }
 
   // --- Categorias Extras ---
   async getCategoriasExtras(): Promise<CategoriaExtra[]> {
-    return this.getWithCache('categorias_extras', async () => {
-      const { data, error } = await supabase
-        .from('categorias_extras')
-        .select('*')
-        .order('nome');
-      if (error) throw error;
-      return data || [];
-    });
+    const { data, error } = await supabase
+      .from('categorias_extras')
+      .select('*')
+      .order('nome');
+    if (error) throw error;
+    return data || [];
   }
 
   // --- Pedidos Itens & Extras ---
-  async savePedidoItens(itens: any[]): Promise<void> {
+  async savePedidoItens(itens: Partial<PedidoItem>[]): Promise<void> {
     const { error } = await supabase.from('pedidos_itens').insert(itens);
     if (error) throw error;
-    cacheService.invalidateCache('pedidos');
   }
 
-  async savePedidoExtras(extras: any[]): Promise<void> {
+  async savePedidoExtras(extras: Partial<PedidoExtra>[]): Promise<void> {
     const { error } = await supabase.from('pedidos_extras').insert(extras);
     if (error) throw error;
-    cacheService.invalidateCache('pedidos');
   }
 
   async deletePedidoItens(pedidoId: string): Promise<void> {
@@ -579,18 +511,16 @@ class DataService {
   }
 
   // --- Generic Methods for DatabaseGrid ---
-  async getTableData(table: string): Promise<any[]> {
-    return this.getWithCache(table, async () => {
-      const { data, error } = await supabase
-        .from(table)
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data || [];
-    });
+  async getTableData(table: string): Promise<Record<string, unknown>[]> {
+    const { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
   }
 
-  async saveEntity(table: string, entity: any): Promise<any> {
+  async saveEntity(table: string, entity: Record<string, unknown>): Promise<Record<string, unknown>> {
     let query;
     if (entity.id) {
       query = supabase.from(table).update(entity).eq('id', entity.id);
@@ -599,37 +529,17 @@ class DataService {
     }
 
     const { data, error } = await query.select().single();
-    
     if (error) throw error;
-    
-    // Invalidate relevant caches
-    cacheService.invalidateCache(table);
-    if (table === 'ingredientes' || table === 'categorias' || table === 'produto_ingredientes') {
-      cacheService.invalidateCache('produtos');
-    }
-    if (table === 'pedidos') {
-      cacheService.invalidateCache('clientes');
-    }
-    
     return data;
   }
 
-  async insertEntities(table: string, entities: any[]): Promise<any[]> {
+  async insertEntities(table: string, entities: Record<string, unknown>[]): Promise<Record<string, unknown>[]> {
     const { data, error } = await supabase
       .from(table)
       .insert(entities)
       .select();
     
     if (error) throw error;
-    
-    cacheService.invalidateCache(table);
-    if (table === 'ingredientes' || table === 'categorias' || table === 'produto_ingredientes') {
-      cacheService.invalidateCache('produtos');
-    }
-    if (table === 'pedidos') {
-      cacheService.invalidateCache('clientes');
-    }
-    
     return data || [];
   }
 
@@ -637,19 +547,35 @@ class DataService {
     const { error } = await supabase.from(table).delete().eq('id', id);
     if (error) {
       console.error(`[Supabase Error] Falha ao deletar de ${table}:`, error);
-      if (error.code === '23503') {
-        console.warn(`DICA: O item '${id}' em '${table}' ainda está sendo usado em outra tabela.`);
-      }
       throw error;
     }
-    
-    cacheService.invalidateCache(table);
-    if (table === 'ingredientes' || table === 'categorias' || table === 'produto_ingredientes') {
-      cacheService.invalidateCache('produtos');
+  }
+
+  // --- Estoque ---
+  async getMovimentacoesEstoque(insumoId?: string): Promise<MovimentacaoEstoque[]> {
+    let query = supabase
+      .from('movimentacoes_estoque')
+      .select('*, insumo:ingredientes(*)')
+      .order('created_at', { ascending: false });
+
+    if (insumoId) {
+      query = query.eq('insumo_id', insumoId);
     }
-    if (table === 'pedidos') {
-      cacheService.invalidateCache('clientes');
-    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
+  }
+
+  async saveMovimentacaoEstoque(movimentacao: Partial<MovimentacaoEstoque>): Promise<MovimentacaoEstoque> {
+    const { data, error } = await supabase
+      .from('movimentacoes_estoque')
+      .insert(movimentacao)
+      .select('*, insumo:ingredientes(*)')
+      .single();
+
+    if (error) throw error;
+    return data;
   }
 
   // --- Storage ---
@@ -662,11 +588,7 @@ class DataService {
       .from('produtos')
       .upload(filePath, file);
 
-    if (uploadError) {
-      // If bucket doesn't exist, we might get an error. 
-      // In a real app, we'd ensure the bucket exists.
-      throw uploadError;
-    }
+    if (uploadError) throw uploadError;
 
     const { data } = supabase.storage
       .from('produtos')

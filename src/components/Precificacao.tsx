@@ -1,7 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { dataService } from '../services/dataService';
+import React, { useState } from 'react';
 import { useAuth } from '../lib/auth';
-import { Produto, Categoria } from '../types';
 import { 
   formatCurrency, 
   calculateProductPricing, 
@@ -9,7 +7,6 @@ import {
 } from '../services/bakeryService';
 import { 
   Search, 
-  TrendingUp, 
   AlertTriangle, 
   CheckCircle2, 
   Info,
@@ -17,65 +14,35 @@ import {
   DollarSign
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useProdutos, useCategorias, useSaveEntity, useRecalculateEverything, useRecalculateProduct } from '../hooks/useQueries';
 
 export const Precificacao = () => {
-  const { user } = useAuth();
-  const [products, setProducts] = useState<Produto[]>([]);
-  const [categories, setCategories] = useState<Categoria[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [_user] = useState(useAuth().user);
+  const { data: products = [], isLoading: loadingProd } = useProdutos();
+  const { data: categories = [], isLoading: loadingCat } = useCategorias();
+  
   const [searchTerm, setSearchTerm] = useState('');
-  const [updatingId, setUpdatingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+  const saveProductMutation = useSaveEntity('produtos');
+  const recalculateEverythingMutation = useRecalculateEverything();
+  const recalculateProductMutation = useRecalculateProduct();
 
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const [prodRes, catRes] = await Promise.all([
-        dataService.getProdutos(),
-        dataService.getCategorias()
-      ]);
+  const loading = loadingProd || loadingCat;
 
-      setProducts(prodRes || []);
-      setCategories(catRes || []);
-    } catch (error: any) {
-      console.error('Erro ao carregar dados de precificação:', error);
-      toast.error('Erro ao carregar produtos');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleUpdate = async (id: string, field: string, value: any) => {
-    setUpdatingId(id);
-    try {
-      await dataService.saveProduto({ id, [field]: value } as any);
-
-      // Recalcular após atualização
-      const updatedProduct = await dataService.recalculateProduct(id);
-      if (updatedProduct) {
-        setProducts(prev => prev.map(p => p.id === id ? updatedProduct : p));
+  const handleUpdate = async (id: string, field: string, value: unknown) => {
+    saveProductMutation.mutate({ id, [field]: value }, {
+      onSuccess: () => {
+        recalculateProductMutation.mutate(id);
+      },
+      onError: (error) => {
+        console.error('Erro ao atualizar produto:', error);
+        toast.error('Erro ao salvar alteração');
       }
-    } catch (error: any) {
-      console.error('Erro ao atualizar produto:', error);
-      toast.error('Erro ao salvar alteração');
-    } finally {
-      setUpdatingId(null);
-    }
+    });
   };
 
   const recalculateAll = async () => {
-    const loadingToast = toast.loading('Recalculando toda a base (Produtos e Pedidos)...');
-    try {
-      await dataService.recalculateEverything();
-      await fetchData();
-      toast.success('Base de dados totalmente sincronizada!', { id: loadingToast });
-    } catch (err: any) {
-      console.error('Erro no recálculo global:', err);
-      toast.error(`Erro no recálculo: ${err.message}`, { id: loadingToast });
-    }
+    recalculateEverythingMutation.mutate();
   };
 
   const getMarginColor = (margin: number) => {
@@ -115,9 +82,11 @@ export const Precificacao = () => {
           </div>
           <button 
             onClick={recalculateAll}
-            className="flex items-center gap-2 px-4 py-2 bg-primary text-white font-bold rounded-xl text-sm hover:opacity-90 transition-all whitespace-nowrap"
+            disabled={recalculateEverythingMutation.isPending}
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-white font-bold rounded-xl text-sm hover:opacity-90 transition-all whitespace-nowrap disabled:opacity-50"
           >
-            <RefreshCw size={16} /> Recalcular Tudo
+            <RefreshCw size={16} className={recalculateEverythingMutation.isPending ? 'animate-spin' : ''} /> 
+            {recalculateEverythingMutation.isPending ? 'Recalculando...' : 'Recalcular Tudo'}
           </button>
         </div>
       </div>
@@ -192,7 +161,7 @@ export const Precificacao = () => {
                   
                   // Calcular preço sugerido (sempre baseado no markup/margem real configurada, ignorando o manual)
                   const { precoVendaFinal: precoSugerido } = calculateProductPricing(
-                    product.custo_unitario_snapshot || 0,
+                    product.custo_unitario || 0,
                     activeMargin.margem,
                     activeMargin.tipo,
                     false, // Forçar cálculo automático para o sugerido

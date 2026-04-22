@@ -46,8 +46,8 @@ export const Register = () => {
       setTimeout(() => {
         navigate('/login');
       }, 1500);
-    } catch (error: any) {
-      toast.error(error.message || 'Erro ao criar conta. Tente novamente.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Erro ao criar conta. Tente novamente.');
     } finally {
       setLoading(false);
     }

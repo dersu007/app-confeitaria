@@ -1,27 +1,45 @@
 {
   "compilerOptions": {
+    /* Vite Defaults */
     "target": "ES2022",
-    "experimentalDecorators": true,
-    "useDefineForClassFields": false,
     "module": "ESNext",
-    "lib": [
-      "ES2022",
-      "DOM",
-      "DOM.Iterable"
-    ],
-    "skipLibCheck": true,
     "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "useDefineForClassFields": false,
     "isolatedModules": true,
     "moduleDetection": "force",
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
     "allowJs": true,
-    "jsx": "react-jsx",
     "types": ["vite/client"],
     "paths": {
-      "@/*": [
-        "./*"
-      ]
+      "@/*": ["./*"]
     },
-    "allowImportingTsExtensions": true,
-    "noEmit": true
+
+    /* Security & Strictness Mode (Production Level) */
+    "strict": true, // Ativa o conjunto completo de verificações de tipo fundamentais.
+    "noImplicitAny": true, // Impede que o compilador assuma 'any' quando o tipo não é declarado.
+    "strictNullChecks": true, // Obriga a verificação explícita de valores null/undefined, evitando erros runtime.
+    "noUnusedLocals": true, // Mantém o código limpo reportando variáveis locais não utilizadas.
+    "noUnusedParameters": true, // Garante integridade de assinaturas de funções reportando parâmetros inúteis.
+    "exactOptionalPropertyTypes": true, // Impede a atribuição de 'undefined' a campos opcionais que não o permitem explicitamente.
+    
+    /* Complementary strict rules */
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "strictPropertyInitialization": true,
+    "noImplicitThis": true,
+    "useUnknownInCatchVariables": true,
+    "alwaysStrict": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "allowUnusedLabels": false,
+    "allowUnreachableCode": false,
+    "experimentalDecorators": true
   }
 }

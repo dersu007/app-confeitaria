@@ -1,32 +1,28 @@
-import React, { useState, useEffect } from 'react';
-import { dataService } from '../../services/dataService';
-import { Cliente, Pedido } from '../../types';
+import React, { useState } from 'react';
 import { 
-  Users, 
   UserPlus, 
   Search, 
-  Filter, 
   Download, 
   MoreHorizontal, 
   Calendar, 
   TrendingUp, 
   Lightbulb,
   ChevronRight,
-  Star,
-  Clock,
   ShoppingBag,
   Trash2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { formatCurrency } from '../../services/bakeryService';
-import { format, differenceInDays, parseISO, isAfter, addDays, isValid } from 'date-fns';
+import { format, differenceInDays, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { exportToCSV } from '../../utils/csvUtils';
+import { useClientes, useSaveCliente, useDeleteCliente } from '../../hooks/useQueries';
+import { Cliente } from '../../types';
 
 export const Clientes = () => {
-  const [clientes, setClientes] = useState<Cliente[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: clientes = [], isLoading: loading } = useClientes();
+  const deleteMutation = useDeleteCliente();
   const [searchTerm, setSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState<'Todos' | 'VIP' | 'Frequente' | 'Novo' | 'Inativo'>('Todos');
   const [showModal, setShowModal] = useState(false);
@@ -34,11 +30,6 @@ export const Clientes = () => {
   const [isExporting, setIsExporting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [clienteToDelete, setClienteToDelete] = useState<Cliente | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
-
-  useEffect(() => {
-    fetchClientes();
-  }, []);
 
   const handleExportCSV = () => {
     if (filteredClientes.length === 0) {
@@ -93,32 +84,18 @@ export const Clientes = () => {
     }
   };
 
-  const fetchClientes = async () => {
-    setLoading(true);
-    try {
-      const data = await dataService.getClientes();
-      setClientes(data || []);
-    } catch (error) {
-      toast.error('Erro ao carregar clientes');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleDeleteCliente = async () => {
     if (!clienteToDelete) return;
     
-    setIsDeleting(true);
     try {
-      await dataService.deleteCliente(clienteToDelete.id);
-      setClientes(prev => prev.filter(c => c.id !== clienteToDelete.id));
+      await deleteMutation.mutateAsync(clienteToDelete.id);
       toast.success('Cliente removido com sucesso');
       setShowDeleteConfirm(false);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Erro ao excluir cliente:', error);
-      toast.error(error.message || 'Erro ao excluir cliente');
+      const message = error instanceof Error ? error.message : 'Erro ao excluir cliente';
+      toast.error(message);
     } finally {
-      setIsDeleting(false);
       setClienteToDelete(null);
     }
   };
@@ -206,7 +183,7 @@ export const Clientes = () => {
             {['Todos', 'VIP', 'Frequente', 'Novo', 'Inativo'].map((f) => (
               <button
                 key={f}
-                onClick={() => setActiveFilter(f as any)}
+                onClick={() => setActiveFilter(f as typeof activeFilter)}
                 className={`px-4 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${activeFilter === f ? 'bg-white shadow-sm text-primary' : 'text-on-surface-variant hover:text-primary'}`}
               >
                 {f}
@@ -398,7 +375,6 @@ export const Clientes = () => {
         <ClienteModal 
           cliente={editingCliente} 
           onClose={() => setShowModal(false)} 
-          onSave={() => { fetchClientes(); setShowModal(false); }} 
         />
       )}
 
@@ -409,14 +385,15 @@ export const Clientes = () => {
         description={`Tem certeza que deseja excluir ${clienteToDelete?.nome}? Esta ação não pode ser desfeita e removerá todo o histórico se permitido pelo sistema.`}
         onConfirm={handleDeleteCliente}
         onCancel={() => { setShowDeleteConfirm(false); setClienteToDelete(null); }}
-        isLoading={isDeleting}
+        isLoading={deleteMutation.isPending}
       />
     </div>
   );
 };
 
 // Cliente Modal Component
-const ClienteModal = ({ cliente, onClose, onSave }: { cliente: Cliente | null, onClose: () => void, onSave: () => void }) => {
+const ClienteModal = ({ cliente, onClose }: { cliente: Cliente | null, onClose: () => void }) => {
+  const saveMutation = useSaveCliente();
   const [formData, setFormData] = useState({
     nome: cliente?.nome || '',
     email: cliente?.email || '',
@@ -430,25 +407,24 @@ const ClienteModal = ({ cliente, onClose, onSave }: { cliente: Cliente | null, o
     e.preventDefault();
     
     // Clean up data: convert empty strings to null for optional fields
-    const submissionData = {
+    const submissionData: Partial<Cliente> = {
       id: cliente?.id,
       nome: formData.nome,
       email: formData.email || null,
       telefone: formData.telefone || null,
       data_nascimento: formData.data_nascimento || null,
       observacoes: formData.observacoes || null,
-      status: formData.status
+      status: formData.status as Cliente['status']
     };
 
     try {
-      const result = await dataService.saveCliente(submissionData as any);
-      if (result) {
-        toast.success(cliente ? 'Cliente atualizado' : 'Cliente cadastrado');
-        onSave();
-      }
-    } catch (error: any) {
+      await saveMutation.mutateAsync(submissionData);
+      toast.success(cliente ? 'Cliente atualizado' : 'Cliente cadastrado');
+      onClose();
+    } catch (error: unknown) {
       console.error('Erro ao salvar cliente:', error);
-      toast.error(`Erro ao salvar: ${error.message}`);
+      const message = error instanceof Error ? error.message : 'Erro ao salvar cliente';
+      toast.error(`Erro ao salvar: ${message}`);
     }
   };
 
@@ -495,7 +471,7 @@ const ClienteModal = ({ cliente, onClose, onSave }: { cliente: Cliente | null, o
               <label className="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Status</label>
               <select 
                 value={formData.status}
-                onChange={e => setFormData({...formData, status: e.target.value as any})}
+                onChange={e => setFormData({...formData, status: e.target.value as Cliente['status']})}
                 className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 appearance-none cursor-pointer"
               >
                 <option value="Novo">Novo</option>
@@ -533,9 +509,10 @@ const ClienteModal = ({ cliente, onClose, onSave }: { cliente: Cliente | null, o
             </button>
             <button 
               type="submit"
-              className="flex-grow py-3 bg-primary text-white font-bold rounded-xl hover:bg-primary/90 transition-all shadow-lg shadow-primary/20"
+              disabled={saveMutation.isPending}
+              className="flex-grow py-3 bg-primary text-white font-bold rounded-xl hover:bg-primary/90 transition-all shadow-lg shadow-primary/20 disabled:opacity-50"
             >
-              Salvar Cliente
+              {saveMutation.isPending ? 'Salvando...' : 'Salvar Cliente'}
             </button>
           </div>
         </form>

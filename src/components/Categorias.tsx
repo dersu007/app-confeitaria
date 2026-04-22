@@ -3,14 +3,18 @@ import { DatabaseGrid, EditableCell, SelectCell } from './DatabaseGrid';
 import { createColumnHelper } from '@tanstack/react-table';
 import { Tags, RefreshCw, Archive, ArchiveRestore, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { dataService } from '../services/dataService';
-import { Produto } from '../types';
+import { useProdutos, useRecalculateEverything, useSaveEntity } from '../hooks/useQueries';
 
-const columnHelper = createColumnHelper<any>();
+import { Categoria } from '../types';
+import { Row, Table } from '@tanstack/react-table';
 
-const ArchiveCell = ({ getValue, row, column: { id }, table }: any) => {
+const columnHelper = createColumnHelper<Categoria>();
+
+const ArchiveCell = ({ getValue, row, table: _tableInstance }: { getValue: () => boolean | undefined, row: Row<Categoria>, table: Table<Categoria> }) => {
   const initialValue = getValue();
   const [loading, setLoading] = useState(false);
+  const { data: produtos = [] } = useProdutos();
+  const saveCategoryMutation = useSaveEntity('categorias');
 
   const handleToggle = async () => {
     const categoryId = row.original.id;
@@ -19,36 +23,30 @@ const ArchiveCell = ({ getValue, row, column: { id }, table }: any) => {
 
     if (willArchive) {
       setLoading(true);
-      try {
-        const products = await dataService.getProdutos();
-        const activeProductsInCategory = products.filter(p => p.categoria_id === categoryId && p.ativo !== false);
-        
-        if (activeProductsInCategory.length > 0) {
-          toast.error(
-            "Esta categoria possui produtos ativos. Arquive os produtos antes ou mova-os de categoria.",
-            { duration: 5000, icon: <AlertCircle className="text-error" /> }
-          );
-          setLoading(false);
-          return;
-        }
-      } catch (error) {
-        console.error('Erro ao verificar produtos da categoria:', error);
-        toast.error('Erro ao validar arquivamento.');
+      const activeProductsInCategory = produtos.filter(p => p.categoria_id === categoryId && p.ativo !== false);
+      
+      if (activeProductsInCategory.length > 0) {
+        toast.error(
+          "Esta categoria possui produtos ativos. Arquive os produtos antes ou mova-os de categoria.",
+          { duration: 5000, icon: <AlertCircle className="text-error" /> }
+        );
         setLoading(false);
         return;
       }
     }
 
-    try {
-      await dataService.saveEntity('categorias', { id: categoryId, ativo: !isCurrentlyActive });
-      table.options.meta?.updateData(categoryId, id, !isCurrentlyActive);
-      toast.success(`Categoria ${!isCurrentlyActive ? 'ativada' : 'arquivada'} com sucesso!`);
-    } catch (error) {
-      console.error('Erro ao alternar status da categoria:', error);
-      toast.error('Erro ao atualizar status.');
-    } finally {
-      setLoading(false);
-    }
+    setLoading(true);
+    saveCategoryMutation.mutate({ id: categoryId, ativo: !isCurrentlyActive }, {
+      onSuccess: () => {
+        toast.success(`Categoria ${!isCurrentlyActive ? 'ativada' : 'arquivada'} com sucesso!`);
+        setLoading(false);
+      },
+      onError: (error) => {
+        console.error('Erro ao alternar status da categoria:', error);
+        toast.error('Erro ao atualizar status.');
+        setLoading(false);
+      }
+    });
   };
 
   return (
@@ -70,24 +68,11 @@ const ArchiveCell = ({ getValue, row, column: { id }, table }: any) => {
 };
 
 export const Categorias = () => {
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [isRecalculating, setIsRecalculating] = useState(false);
   const [viewStatus, setViewStatus] = useState<'ativos' | 'arquivados'>('ativos');
-
-  const refresh = () => setRefreshKey(prev => prev + 1);
+  const recalculateEverythingMutation = useRecalculateEverything();
 
   const recalculateAll = async () => {
-    setIsRecalculating(true);
-    const loadingToast = toast.loading('Recalculando toda a base...');
-    try {
-      await dataService.recalculateEverything();
-      refresh();
-      toast.success('Custos recalculados com sucesso!', { id: loadingToast });
-    } catch (error) {
-      toast.error('Erro ao recalcular', { id: loadingToast });
-    } finally {
-      setIsRecalculating(false);
-    }
+    recalculateEverythingMutation.mutate();
   };
 
   const categoryColumns = [
@@ -137,11 +122,11 @@ export const Categorias = () => {
           </div>
           <button 
             onClick={recalculateAll}
-            disabled={isRecalculating}
+            disabled={recalculateEverythingMutation.isPending}
             className="flex items-center gap-2 bg-surface-container-low text-primary px-4 py-3 rounded-xl font-bold border border-primary/20 hover:bg-primary/5 transition-all text-sm disabled:opacity-50"
             title="Recalcula custos de todos os produtos vinculados"
           >
-            <RefreshCw size={18} className={isRecalculating ? 'animate-spin' : ''} /> Recalcular Tudo
+            <RefreshCw size={18} className={recalculateEverythingMutation.isPending ? 'animate-spin' : ''} /> Recalcular Tudo
           </button>
         </div>
       </div>
@@ -152,7 +137,6 @@ export const Categorias = () => {
           title="Gestão de Categorias" 
           columns={categoryColumns} 
           onDataChange={recalculateAll} 
-          refreshKey={refreshKey}
           showArchived={viewStatus === 'arquivados'}
         />
       </div>
