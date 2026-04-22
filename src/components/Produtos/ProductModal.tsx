@@ -235,7 +235,8 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
         margem_real_calculada: margemRealCalculada,
         // Backwards compatibility
         custo_total_calculado: custoInsumos,
-        custo_unitario_snapshot: currentUnitCost
+        custo_unitario_snapshot: currentUnitCost,
+        ativo: productToEditState?.ativo ?? true
       };
 
       const savedProduct = await dataService.saveProduto(rawProductData as any);

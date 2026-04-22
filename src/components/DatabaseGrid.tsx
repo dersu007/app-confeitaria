@@ -429,11 +429,13 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
           rawRowData.margem_percentual = rawRowData.margem_percentual || 30;
           rawRowData.margem_tipo = rawRowData.margem_tipo || 'markup';
           rawRowData.rendimento_unidades = rawRowData.rendimento_unidades || 1;
+          rawRowData.ativo = true;
         }
 
         if (table === 'categorias') {
           rawRowData.margem_padrao = rawRowData.margem_padrao || 100;
           rawRowData.tipo_margem = rawRowData.tipo_margem || 'markup';
+          rawRowData.ativo = true;
         }
 
         // Limpeza final do objeto de importação

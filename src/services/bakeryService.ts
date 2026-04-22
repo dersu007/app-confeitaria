@@ -145,7 +145,8 @@ export const sanitizeProductUpdate = (productData: any) => {
     'margem_real_calculada',
     'peso_final_produto',
     'modo_preparo',
-    'imagem_url'
+    'imagem_url',
+    'ativo'
   ];
 
   // Optional fields that might not exist in some schemas
