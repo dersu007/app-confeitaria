@@ -19,7 +19,9 @@ import {
   X,
   BookOpen,
   Loader2,
-  Copy
+  Copy,
+  LayoutGrid,
+  List
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Produto, Categoria, ProdutoIngrediente } from '../types';
@@ -28,6 +30,7 @@ import { PieChart as RePieChart, Pie, Cell, ResponsiveContainer, Tooltip as ReTo
 import { ProductModal } from './Produtos/ProductModal';
 import { DEFAULT_PRODUCT_IMAGE } from '../constants';
 import { ConfirmDialog } from './ui/ConfirmDialog';
+import { exportToCSV } from '../utils/csvUtils';
 
 export const Produtos = () => {
   const [produtos, setProdutos] = useState<Produto[]>([]);
@@ -42,10 +45,60 @@ export const Produtos = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [productToDelete, setProductToDelete] = useState<Produto | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
   useEffect(() => {
     fetchData();
   }, []);
+
+  const handleExportCSV = () => {
+    setIsExporting(true);
+    try {
+      const exportData = produtos.map(p => ({
+        nome: p.nome,
+        categoria: categorias.find(c => c.id === p.categoria_id)?.nome || 'Sem Categoria',
+        rendimento: p.rendimento_unidades,
+        peso_final: p.peso_final_produto,
+        tempo_producao: `${p.tempo_producao_valor} ${p.tempo_producao_unidade}`,
+        custo_hora: p.custo_hora_trabalho,
+        custo_mao_obra: p.custo_mao_obra,
+        custo_fixo: p.custo_fixo_rateado,
+        custo_embalagem: p.custo_embalagem,
+        custo_total: p.custo_total,
+        custo_unitario: p.custo_unitario,
+        margem_real: p.margem_real_calculada,
+        preco_venda: p.preco_venda_final,
+        modo_preparo: (p.modo_preparo || '').replace(/\n/g, ' ')
+      }));
+
+      const success = exportToCSV(
+        exportData,
+        {
+          nome: 'Nome',
+          categoria: 'Categoria',
+          rendimento: 'Rendimento (Unidades)',
+          peso_final: 'Peso Final (g)',
+          tempo_producao: 'Tempo de Produção',
+          custo_hora: 'Custo Hora Trabalho',
+          custo_mao_obra: 'Custo Mão de Obra',
+          custo_fixo: 'Custo Fixo Rateado',
+          custo_embalagem: 'Custo Embalagem',
+          custo_total: 'Custo Total',
+          custo_unitario: 'Custo Unitário',
+          margem_real: 'Margem de Lucro Real (%)',
+          preco_venda: 'Preço de Venda Final',
+          modo_preparo: 'Modo de Preparo'
+        },
+        'produtos_detalhado'
+      );
+      if (success) toast.success('Relatório detalhado de produtos exportado!');
+    } catch (error) {
+      toast.error('Erro ao exportar CSV');
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -194,12 +247,37 @@ export const Produtos = () => {
           <h1 className="text-2xl font-bold headline text-on-surface">Produtos</h1>
           <p className="text-sm text-on-surface-variant">Gerencie seu catálogo de produtos e precificação</p>
         </div>
-        <button 
-          onClick={handleAddProduct}
-          className="flex items-center gap-2 bg-primary text-white px-6 py-3 rounded-xl font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all"
-        >
-          <Plus size={20} /> Novo Produto
-        </button>
+        <div className="flex gap-3">
+          <div className="flex bg-surface-container-low p-1 rounded-xl border border-surface-container-high transition-all">
+            <button 
+              onClick={() => setViewMode('grid')}
+              className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-white shadow-sm text-primary' : 'text-on-surface-variant hover:text-primary'}`}
+              title="Visualização em Grade"
+            >
+              <LayoutGrid size={18} />
+            </button>
+            <button 
+              onClick={() => setViewMode('list')}
+              className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-primary' : 'text-on-surface-variant hover:text-primary'}`}
+              title="Visualização em Lista"
+            >
+              <List size={18} />
+            </button>
+          </div>
+          <button 
+            onClick={handleExportCSV}
+            disabled={isExporting}
+            className="hidden sm:flex items-center gap-2 bg-white text-on-surface px-4 py-3 rounded-xl font-bold border border-surface-container-high shadow-m hover:bg-surface-container-low transition-all text-sm disabled:opacity-50"
+          >
+            <Download size={18} /> Exportar CSV
+          </button>
+          <button 
+            onClick={handleAddProduct}
+            className="flex items-center gap-2 bg-primary text-white px-6 py-3 rounded-xl font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all text-sm"
+          >
+            <Plus size={20} /> Novo Produto
+          </button>
+        </div>
       </div>
 
       <div className="flex items-center gap-4 bg-surface-container-low px-4 py-3 rounded-xl border border-surface-container-high">
@@ -213,72 +291,173 @@ export const Produtos = () => {
         />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-        {filteredProdutos.map(produto => (
-          <div 
-            key={produto.id} 
-            onClick={() => handleProductClick(produto)}
-            className="bg-white rounded-2xl shadow-sm border border-surface-container-high hover:shadow-md transition-all group cursor-pointer overflow-hidden flex flex-col"
-          >
-            <div className="aspect-video bg-surface-container-low relative overflow-hidden">
-              <img 
-                src={produto.imagem_url || DEFAULT_PRODUCT_IMAGE} 
-                alt={produto.nome} 
-                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                referrerPolicy="no-referrer"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = DEFAULT_PRODUCT_IMAGE;
-                }}
-              />
-              <div className="absolute top-3 right-3 flex flex-col gap-2 scale-0 group-hover:scale-100 transition-transform origin-right duration-300">
-                <div className="px-2 py-1 bg-white/90 backdrop-blur-sm rounded-lg text-[10px] font-bold text-primary border border-primary/20 text-center shadow-sm">
-                  {getCategoryName(produto.categoria_id)}
-                </div>
-                <button 
-                  onClick={(e) => handleDuplicateProduct(e, produto)}
-                  className="p-2 bg-primary text-white rounded-lg shadow-lg hover:bg-primary/90 transition-all flex items-center justify-center border border-white/20"
-                  title="Duplicar Produto"
-                >
-                  <Copy size={14} />
-                </button>
-              </div>
-            </div>
-            
-            <div className="p-5 flex-grow flex flex-col">
-              <h3 className="text-lg font-bold headline text-on-surface mb-1 truncate">{produto.nome}</h3>
-              <div className="flex items-center gap-2 text-[10px] text-on-surface-variant mb-4">
-                <Clock size={12} />
-                <span>{produto.tempo_producao_valor ? `${produto.tempo_producao_valor} ${produto.tempo_producao_unidade === 'horas' ? 'h' : 'min'}` : '--'}</span>
-                <span className="mx-1">•</span>
-                <span>{produto.rendimento_unidades} un</span>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4 pt-4 border-t border-surface-container-high">
-                <div>
-                  <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Custo Unit.</span>
-                  <span className="text-sm font-bold text-on-surface">
-                    {formatCurrency(produto.custo_unitario || 0)}
-                  </span>
-                </div>
-                <div className="text-right">
-                  <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Preço Venda</span>
-                  <span className="text-lg font-bold text-primary">{formatCurrency(produto.preco_venda_final)}</span>
+      {loading ? (
+        <div className="flex flex-col items-center justify-center py-20 gap-4">
+          <Loader2 size={40} className="text-primary animate-spin opacity-40" />
+          <p className="text-sm text-on-surface-variant font-medium">Carregando seu catálogo...</p>
+        </div>
+      ) : viewMode === 'grid' ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {filteredProdutos.map(produto => (
+            <div 
+              key={produto.id} 
+              onClick={() => handleProductClick(produto)}
+              className="bg-white rounded-2xl shadow-sm border border-surface-container-high hover:shadow-md transition-all group cursor-pointer overflow-hidden flex flex-col"
+            >
+              <div className="aspect-video bg-surface-container-low relative overflow-hidden">
+                <img 
+                  src={produto.imagem_url || DEFAULT_PRODUCT_IMAGE} 
+                  alt={produto.nome} 
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = DEFAULT_PRODUCT_IMAGE;
+                  }}
+                />
+                <div className="absolute top-3 right-3 flex flex-col gap-2 scale-0 group-hover:scale-100 transition-transform origin-right duration-300">
+                  <div className="px-2 py-1 bg-white/90 backdrop-blur-sm rounded-lg text-[10px] font-bold text-primary border border-primary/20 text-center shadow-sm">
+                    {getCategoryName(produto.categoria_id)}
+                  </div>
+                  <button 
+                    onClick={(e) => handleDuplicateProduct(e, produto)}
+                    className="p-2 bg-primary text-white rounded-lg shadow-lg hover:bg-primary/90 transition-all flex items-center justify-center border border-white/20"
+                    title="Duplicar Produto"
+                  >
+                    <Copy size={14} />
+                  </button>
                 </div>
               </div>
               
-              <div className="mt-4 flex items-center justify-between">
-                <div className={`flex items-center gap-1 text-xs font-bold ${produto.margem_real_calculada >= 40 ? 'text-primary' : 'text-error'}`}>
-                  {produto.margem_real_calculada >= 40 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-                  <span>{produto.margem_real_calculada.toFixed(1)}% margem</span>
+              <div className="p-5 flex-grow flex flex-col">
+                <h3 className="text-lg font-bold headline text-on-surface mb-1 truncate">{produto.nome}</h3>
+                <div className="flex items-center gap-2 text-[10px] text-on-surface-variant mb-4">
+                  <Clock size={12} />
+                  <span>{produto.tempo_producao_valor ? `${produto.tempo_producao_valor} ${produto.tempo_producao_unidade === 'horas' ? 'h' : 'min'}` : '--'}</span>
+                  <span className="mx-1">•</span>
+                  <span>{produto.rendimento_unidades} un</span>
                 </div>
-                <div className="flex items-center gap-1 text-[10px] font-bold text-primary">
-                  <BookOpen size={12} /> Ver Detalhes
+                
+                <div className="grid grid-cols-2 gap-4 pt-4 border-t border-surface-container-high">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Custo Unit.</span>
+                    <span className="text-sm font-bold text-on-surface">
+                      {formatCurrency(produto.custo_unitario || 0)}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Preço Venda</span>
+                    <span className="text-lg font-bold text-primary">{formatCurrency(produto.preco_venda_final)}</span>
+                  </div>
+                </div>
+                
+                <div className="mt-4 flex items-center justify-between">
+                  <div className={`flex items-center gap-1 text-xs font-bold ${produto.margem_real_calculada >= 40 ? 'text-primary' : 'text-error'}`}>
+                    {produto.margem_real_calculada >= 40 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+                    <span>{produto.margem_real_calculada.toFixed(1)}% margem</span>
+                  </div>
+                  <div className="flex items-center gap-1 text-[10px] font-bold text-primary">
+                    <BookOpen size={12} /> Ver Detalhes
+                  </div>
                 </div>
               </div>
             </div>
+          ))}
+        </div>
+      ) : (
+        <div className="bg-surface-container-lowest rounded-2xl border border-surface-container-high shadow-m overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-surface-container-low/50 border-b border-surface-container-high">
+                  <th className="px-6 py-5 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Produto</th>
+                  <th className="px-6 py-5 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Categoria</th>
+                  <th className="px-6 py-5 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Preço Venda</th>
+                  <th className="px-6 py-5 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Custo Total</th>
+                  <th className="px-6 py-5 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest text-center">Margem (%)</th>
+                  <th className="px-6 py-5 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest text-center">Lucro (R$)</th>
+                  <th className="px-6 py-5 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Tempo</th>
+                  <th className="px-6 py-5 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest text-right">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-surface-container-high">
+                {filteredProdutos.map(produto => {
+                  const profit = produto.preco_venda_final - (produto.custo_total || 0);
+                  return (
+                    <tr 
+                      key={produto.id} 
+                      onClick={() => handleProductClick(produto)}
+                      className="hover:bg-surface-container-low/30 transition-colors group cursor-pointer"
+                    >
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-4">
+                          <div className="w-10 h-10 rounded-lg overflow-hidden bg-surface-container-low flex-shrink-0">
+                            <img 
+                              src={produto.imagem_url || DEFAULT_PRODUCT_IMAGE} 
+                              alt={produto.nome}
+                              className="w-full h-full object-cover"
+                              referrerPolicy="no-referrer"
+                            />
+                          </div>
+                          <div>
+                            <p className="font-bold text-on-surface text-sm sm:text-base">{produto.nome}</p>
+                            <p className="text-[10px] text-on-surface-variant italic">Rend: {produto.rendimento_unidades} un</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="px-2.5 py-1 bg-surface-container-low rounded-lg text-[10px] font-bold text-primary border border-primary/10">
+                          {getCategoryName(produto.categoria_id)}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 font-bold text-primary text-sm whitespace-nowrap">
+                        {formatCurrency(produto.preco_venda_final)}
+                      </td>
+                      <td className="px-6 py-4 font-medium text-on-surface-variant text-sm whitespace-nowrap">
+                        {formatCurrency(produto.custo_total || 0)}
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <div className={`inline-flex items-center gap-1 text-xs font-bold ${produto.margem_real_calculada >= 40 ? 'text-primary' : 'text-error'}`}>
+                          {produto.margem_real_calculada >= 40 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+                          <span>{produto.margem_real_calculada.toFixed(1)}%</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <span className={`text-sm font-bold ${profit > 0 ? 'text-primary' : 'text-error'}`}>
+                          {formatCurrency(profit)}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2 text-[11px] text-on-surface-variant">
+                          <Clock size={14} />
+                          <span>{produto.tempo_producao_valor ? `${produto.tempo_producao_valor}${produto.tempo_producao_unidade === 'horas' ? 'h' : 'm'}` : '--'}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button 
+                            onClick={(e) => handleDuplicateProduct(e, produto)}
+                            className="p-2 text-on-surface-variant hover:text-primary hover:bg-primary/10 rounded-lg transition-all"
+                            title="Duplicar"
+                          >
+                            <Copy size={16} />
+                          </button>
+                          <button 
+                            onClick={(e) => handleEditProduct(e, produto)}
+                            className="p-2 text-on-surface-variant hover:text-primary hover:bg-primary/10 rounded-lg transition-all"
+                            title="Editar"
+                          >
+                            <Edit2 size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-        ))}
-      </div>
+        </div>
+      )}
 
       {filteredProdutos.length === 0 && !loading && (
         <div className="text-center py-20 bg-surface-container-low rounded-3xl border-2 border-dashed border-surface-container-high">
@@ -462,12 +641,15 @@ const ProductDetail = ({
             <div className="relative z-10">
               <span className="text-[10px] uppercase font-bold opacity-70 block mb-2">Preço Sugerido</span>
               <h2 className="text-5xl font-extrabold headline mb-2">{formatCurrency(product.preco_venda_final)}</h2>
-              <div className="flex items-center gap-2 bg-white/20 backdrop-blur-sm px-3 py-1 rounded-full w-fit">
-                <TrendingUp size={14} />
-                <span className="text-xs font-bold">
-                  Margem: {product.margem_real_calculada.toFixed(0)}% 
-                  ({product.usar_margem_categoria ? 'Categoria' : 'Manual'})
-                </span>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2 bg-white/20 backdrop-blur-sm px-3 py-1 rounded-full w-fit">
+                  <TrendingUp size={14} />
+                  <span className="text-xs font-bold">
+                    Margem: {product.margem_real_calculada.toFixed(0)}% 
+                    ({product.usar_margem_categoria ? 'Categoria' : 'Manual'})
+                  </span>
+                </div>
+                <p className="text-[10px] opacity-80 italic ml-1">Lucro real após pagamento de mão de obra</p>
               </div>
             </div>
             <Calculator className="absolute -right-8 -bottom-8 text-white/10 w-48 h-48 rotate-12" />

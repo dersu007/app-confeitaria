@@ -1,4 +1,4 @@
-export type UnidadeBase = 'g' | 'ml' | 'unidade';
+export type UnidadeBase = 'g' | 'ml' | 'un';
 export type TipoMargem = 'markup' | 'margem_real';
 
 export interface Categoria {
@@ -11,11 +11,13 @@ export interface Categoria {
 export interface Ingrediente {
   id: string;
   nome: string;
+  descricao?: string | null;
   unidade_base: UnidadeBase;
+  unidade_embalagem: string;
   peso_embalagem: number;
   preco_embalagem: number;
   preco_por_unidade_base: number;
-  fornecedor?: string;
+  fornecedor?: string | null;
   data_atualizacao: string;
   estoque_minimo: number;
   estoque_atual: number;

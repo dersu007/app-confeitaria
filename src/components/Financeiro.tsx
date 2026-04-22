@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { DatabaseGrid, EditableCell } from './DatabaseGrid';
 import { createColumnHelper } from '@tanstack/react-table';
-import { CreditCard, TrendingDown, TrendingUp, DollarSign } from 'lucide-react';
+import { CreditCard, TrendingDown, TrendingUp, DollarSign, Download } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { dataService } from '../services/dataService';
 import { formatCurrency } from '../services/bakeryService';
+import { exportToCSV } from '../utils/csvUtils';
 
 const columnHelper = createColumnHelper<any>();
 
@@ -11,8 +13,37 @@ export const Financeiro = () => {
   const [refreshKey, setRefreshKey] = useState(0);
   const [totalExpenses, setTotalExpenses] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [isExporting, setIsExporting] = useState(false);
 
   const refresh = () => setRefreshKey(prev => prev + 1);
+
+  const handleExportCSV = async () => {
+    setIsExporting(true);
+    try {
+      const data = await dataService.getDespesasFixas();
+      
+      const mappedData = data.map(item => ({
+        descricao: item.descricao,
+        categoria: item.categoria,
+        valor_mensal: item.valor_mensal
+      }));
+
+      const success = exportToCSV(
+        mappedData,
+        {
+          descricao: 'Descrição',
+          categoria: 'Categoria',
+          valor_mensal: 'Valor Mensal'
+        },
+        'despesas_fixas_completo'
+      );
+      if (success) toast.success('Relatório de despesas fixas exportado!');
+    } catch (error) {
+      toast.error('Erro ao exportar CSV');
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   useEffect(() => {
     fetchSummary();
@@ -46,6 +77,13 @@ export const Financeiro = () => {
           </h2>
           <p className="text-sm text-on-surface-variant">Controle suas despesas fixas e saúde financeira</p>
         </div>
+        <button 
+          onClick={handleExportCSV}
+          disabled={isExporting}
+          className="flex items-center gap-2 bg-white text-on-surface px-4 py-3 rounded-xl font-bold border border-surface-container-high shadow-sm hover:bg-surface-container-low transition-all text-sm disabled:opacity-50"
+        >
+          <Download size={18} /> Exportar CSV
+        </button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

@@ -18,6 +18,8 @@ import {
   sanitizeProductUpdate
 } from './bakeryService';
 
+import { DEFAULT_CUSTO_HORA } from '../constants';
+
 class DataService {
   // ... existing code ...
   
@@ -58,10 +60,14 @@ class DataService {
       // 4. Calcular custos de mão de obra e fixos
       const tempoValor = Number(product.tempo_producao_valor) || 0;
       const tempoUnidade = product.tempo_producao_unidade || 'horas';
-      const tempoEmHoras = tempoUnidade === 'minutos' ? tempoValor / 60 : tempoValor;
       
-      const custoHora = Number(product.custo_hora_trabalho) || 0;
-      const laborCost = tempoEmHoras * custoHora;
+      // Aplicar novo padrão de custo hora se estiver zerado
+      const custoHora = Number(product.custo_hora_trabalho) || DEFAULT_CUSTO_HORA;
+      
+      // Lógica de cálculo: (tempo_em_minutos / 60) * custo_hora
+      const tempoEmMinutos = tempoUnidade === 'horas' ? tempoValor * 60 : tempoValor;
+      const laborCost = (tempoEmMinutos / 60) * custoHora;
+      
       const fixedCost = Number(product.custo_fixo_rateado) || 0;
       
       // Custo Total = Insumos + Mão de Obra + Custos Fixos

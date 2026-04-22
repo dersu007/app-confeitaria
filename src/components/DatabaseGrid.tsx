@@ -527,7 +527,7 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
             <Plus size={16} /> Adicionar
           </button>
           
-          {(table === 'produtos' || table === 'ingredientes' || table === 'categorias') && (
+          {(table === 'produtos' || table === 'ingredientes' || table === 'categorias' || table === 'despesas_fixas') ? (
             <button 
               onClick={handleRecalculateAll}
               disabled={isRecalculating}
@@ -537,14 +537,15 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
               <RefreshCw size={16} className={isRecalculating ? 'animate-spin' : ''} /> 
               {isRecalculating ? 'Recalculando...' : 'Recalcular Tudo'}
             </button>
+          ) : (
+            <button 
+              onClick={fetchData}
+              title="Atualizar lista"
+              className="p-2 text-on-surface-variant hover:bg-surface-container-low rounded-lg transition-all"
+            >
+              <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+            </button>
           )}
-
-          <button 
-            onClick={fetchData}
-            className="p-2 text-on-surface-variant hover:bg-surface-container-low rounded-lg transition-all"
-          >
-            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
-          </button>
         </div>
       </div>
 

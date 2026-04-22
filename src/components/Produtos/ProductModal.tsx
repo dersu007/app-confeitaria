@@ -6,7 +6,7 @@ import { X, Plus, Package, Image, Clock, Calculator, Save, Weight, DollarSign, U
 import toast from 'react-hot-toast';
 import { formatCurrency, calculateProductPricing, calculateUnitCost, resolveProductMargin } from '../../services/bakeryService';
 import { FichaTecnica } from '../FichaTecnica';
-import { DEFAULT_PRODUCT_IMAGE } from '../../constants';
+import { DEFAULT_PRODUCT_IMAGE, DEFAULT_CUSTO_HORA } from '../../constants';
 
 interface ProductModalProps {
   produto?: Produto | null;
@@ -25,7 +25,7 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
   const [modoPreparo, setModoPreparo] = useState(produto?.modo_preparo || '');
   const [rendimentoUnidades, setRendimentoUnidades] = useState(produto?.rendimento_unidades || 1);
   const [pesoFinal, setPesoFinal] = useState(produto?.peso_final_produto || 0);
-  const [custoHoraTrabalho, setCustoHoraTrabalho] = useState(produto?.custo_hora_trabalho || 0);
+  const [custoHoraTrabalho, setCustoHoraTrabalho] = useState(produto?.custo_hora_trabalho || (produto ? 0 : DEFAULT_CUSTO_HORA));
   const [custoFixoRateado, setCustoFixoRateado] = useState(produto?.custo_fixo_rateado || 0);
   const [custoEmbalagem, setCustoEmbalagem] = useState(produto?.custo_embalagem || 0);
   const [taxaVendaPercentual, setTaxaVendaPercentual] = useState(produto?.taxa_venda_percentual || 0);
@@ -577,6 +577,9 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
                     <span className={`text-xl font-bold ${margemRealCalculada >= 40 ? 'text-primary' : 'text-error'}`}>
                       {margemRealCalculada.toFixed(1)}%
                     </span>
+                    <p className="text-[9px] text-on-surface-variant italic mt-1 max-w-[180px]">
+                      Lucro da empresa após descontar todos os custos, inclusive seu salário.
+                    </p>
                   </div>
                   <div className="text-right">
                     <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block mb-1">Preço Final</span>

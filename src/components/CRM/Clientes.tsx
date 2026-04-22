@@ -19,9 +19,10 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { formatCurrency } from '../../services/bakeryService';
-import { format, differenceInDays, parseISO, isAfter, addDays } from 'date-fns';
+import { format, differenceInDays, parseISO, isAfter, addDays, isValid } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
+import { exportToCSV } from '../../utils/csvUtils';
 
 export const Clientes = () => {
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -47,40 +48,46 @@ export const Clientes = () => {
 
     setIsExporting(true);
     try {
-      const headers = ['Nome', 'E-mail', 'Telefone', 'Status', 'Total de Pedidos', 'Total Gasto (LTV)', 'Última Compra'];
-      
-      const rows = filteredClientes.map(c => [
-        c.nome,
-        c.email || '',
-        c.telefone || '',
-        c.status,
-        c.total_pedidos.toString(),
-        c.valor_total_gasto.toFixed(2).replace('.', ','),
-        c.ultima_compra ? format(parseISO(c.ultima_compra), 'dd/MM/yyyy') : 'Nunca comprou'
-      ]);
+      const mappedData = filteredClientes.map(c => ({
+        nome: c.nome,
+        telefone: c.telefone || 'N/A',
+        email: c.email || 'N/A',
+        status: c.status,
+        frequencia: c.total_pedidos > 0 ? (c.total_pedidos / Math.max(1, differenceInDays(new Date(), parseISO(c.data_cadastro)) / 30)).toFixed(2) : '0',
+        dias_desde_ultima: c.dias_desde_ultima_compra || 'N/A',
+        data_ultima: c.ultima_compra ? format(parseISO(c.ultima_compra), 'dd/MM/yyyy') : 'Nunca',
+        ticket_medio: c.ticket_medio || 0,
+        total_pedidos: c.total_pedidos,
+        ltv: c.valor_total_gasto,
+        data_nascimento: c.data_nascimento ? format(parseISO(c.data_nascimento), 'dd/MM/yyyy') : 'N/A',
+        data_cadastro: c.data_cadastro ? format(parseISO(c.data_cadastro), 'dd/MM/yyyy') : '-',
+        observacoes: (c.observacoes || '').replace(/\n/g, ' ')
+      }));
 
-      const csvContent = [
-        headers.join(';'),
-        ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(';'))
-      ].join('\n');
-
-      const bom = '\uFEFF';
-      const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      const dateStr = format(new Date(), 'yyyy-MM-dd');
+      const success = exportToCSV(
+        mappedData,
+        {
+          nome: 'Nome',
+          telefone: 'Telefone',
+          email: 'E-mail',
+          status: 'Status',
+          frequencia: 'Frequência de Compra (Pedidos/mês)',
+          dias_desde_ultima: 'Dias desde a Última Compra',
+          data_ultima: 'Data da Última Compra',
+          ticket_medio: 'Ticket Médio',
+          total_pedidos: 'Total de Pedidos',
+          ltv: 'Valor Total Gasto (LTV)',
+          data_nascimento: 'Data de Nascimento',
+          data_cadastro: 'Data de Cadastro',
+          observacoes: 'Observações'
+        },
+        'clientes_completo'
+      );
       
-      link.setAttribute('href', url);
-      link.setAttribute('download', `clientes_honey_sugar_${dateStr}.csv`);
-      link.style.visibility = 'hidden';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
-      toast.success('Exportação concluída!');
+      if (success) toast.success('Base de clientes exportada com sucesso!');
     } catch (error) {
       console.error('Erro na exportação:', error);
-      toast.error('Erro ao gerar arquivo');
+      toast.error('Erro ao gerar arquivo CSV');
     } finally {
       setIsExporting(false);
     }

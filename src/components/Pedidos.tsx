@@ -23,6 +23,7 @@ import { ptBR } from 'date-fns/locale';
 import { KanbanBoard } from './Orders/KanbanBoard';
 import { OrderModal } from './Orders/OrderModal';
 import { OrderDetails } from './Orders/OrderDetails';
+import { exportToCSV } from '../utils/csvUtils';
 
 export const Pedidos = () => {
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
@@ -35,10 +36,47 @@ export const Pedidos = () => {
   const [selectedPedido, setSelectedPedido] = useState<Pedido | null>(null);
   const [showDetails, setShowDetails] = useState(false);
   const [isRecalculating, setIsRecalculating] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
     fetchPedidos();
   }, []);
+
+  const handleExportCSV = () => {
+    setIsExporting(true);
+    try {
+      const mappedData = pedidos.map(p => ({
+        id: p.id,
+        data: format(parseISO(p.data_pedido), 'dd/MM/yyyy HH:mm'),
+        cliente: p.cliente?.nome || 'Cliente Removido',
+        status: p.status,
+        prioridade: p.prioridade || 'Normal',
+        tempo_estimado: p.tempo_estimado ? p.tempo_estimado : '-',
+        valor_total: p.valor_total,
+        observacoes: (p.observacoes || '').replace(/\n/g, ' ')
+      }));
+
+      const success = exportToCSV(
+        mappedData,
+        {
+          id: 'ID do Pedido',
+          data: 'Data do Pedido',
+          cliente: 'Nome do Cliente',
+          status: 'Status',
+          prioridade: 'Prioridade',
+          tempo_estimado: 'Tempo Estimado',
+          valor_total: 'Valor Total',
+          observacoes: 'Observações'
+        },
+        'pedidos_completo'
+      );
+      if (success) toast.success('Relatório completo de pedidos exportado!');
+    } catch (error) {
+      toast.error('Erro ao exportar CSV');
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const fetchPedidos = async () => {
     setLoading(true);
@@ -122,6 +160,13 @@ export const Pedidos = () => {
             </button>
           </div>
           <button 
+            onClick={handleExportCSV}
+            disabled={isExporting}
+            className="hidden md:flex items-center gap-2 bg-white text-on-surface px-4 py-2.5 rounded-xl font-bold border border-surface-container-high shadow-sm hover:bg-surface-container-low transition-all text-xs disabled:opacity-50"
+          >
+            <Download size={18} /> Exportar CSV
+          </button>
+          <button 
             onClick={() => { setSelectedPedido(null); setShowModal(true); }}
             className="flex-grow md:flex-none flex items-center justify-center gap-2 px-6 py-2.5 bg-primary text-white font-bold rounded-xl hover:bg-primary/90 transition-all shadow-lg shadow-primary/20"
           >
@@ -154,13 +199,6 @@ export const Pedidos = () => {
           ))}
         </div>
         <div className="flex gap-2 ml-auto">
-          <button 
-            onClick={fetchPedidos}
-            className="p-2.5 text-on-surface-variant hover:bg-surface-container-low rounded-xl transition-all border border-surface-container-high"
-            title="Atualizar lista"
-          >
-            <RefreshCw size={18} className={loading && !isRecalculating ? 'animate-spin' : ''} />
-          </button>
           <button 
             onClick={handleRecalculate}
             disabled={isRecalculating}

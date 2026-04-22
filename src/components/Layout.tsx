@@ -22,6 +22,7 @@ import {
 import { toast } from 'react-hot-toast';
 import { useAuth } from '../lib/auth';
 import { dataService } from '../services/dataService';
+import { cacheService } from '../services/cacheService';
 import { Ingrediente } from '../types';
 
 const SidebarLink = ({ to, icon: Icon, children }: { to: string, icon: any, children: React.ReactNode }) => (
@@ -43,23 +44,76 @@ export const Layout = () => {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const [criticalStockCount, setCriticalStockCount] = React.useState(0);
+  const [openOrdersCount, setOpenOrdersCount] = React.useState(0);
+  const [noCategoryCount, setNoCategoryCount] = React.useState(0);
+  const [isRecalculating, setIsRecalculating] = React.useState(false);
+
+  const fetchNotificationData = async () => {
+    try {
+      const [ingredients, products, orders] = await Promise.all([
+        dataService.getIngredientes(),
+        dataService.getProdutos(),
+        dataService.getPedidos()
+      ]);
+
+      // 1. Estoque Crítico
+      const stockCount = ingredients.filter(i => (i.estoque_atual || 0) <= (i.estoque_minimo || 0)).length;
+      setCriticalStockCount(stockCount);
+
+      // 2. Produtos Sem Categoria
+      const noCatCount = products.filter(p => !p.categoria_id).length;
+      setNoCategoryCount(noCatCount);
+
+      // 3. Pedidos Abertos (Status diferente de Concluído e Cancelado)
+      const openCount = orders.filter(o => o.status !== 'Concluído' && o.status !== 'Cancelado').length;
+      setOpenOrdersCount(openCount);
+
+    } catch (err) {
+      console.error('Erro ao buscar dados de notificação:', err);
+    }
+  };
 
   React.useEffect(() => {
-    const fetchStockStatus = async () => {
-      try {
-        const ingredients = await dataService.getIngredientes();
-        const count = ingredients.filter(i => (i.estoque_atual || 0) <= (i.estoque_minimo || 0)).length;
-        setCriticalStockCount(count);
-      } catch (err) {
-        console.error('Erro ao buscar status de estoque:', err);
-      }
-    };
-
-    fetchStockStatus();
+    fetchNotificationData();
     // Refresh every 5 minutes
-    const interval = setInterval(fetchStockStatus, 5 * 60 * 1000);
+    const interval = setInterval(fetchNotificationData, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
+
+  const handleGlobalRecalculate = async () => {
+    if (isRecalculating) return;
+
+    setIsRecalculating(true);
+    const loadingToast = toast.loading('Calculando custos e margens de todos os produtos...', {
+      style: {
+        borderRadius: '12px',
+        background: '#fff',
+        color: '#6a4a2b',
+        fontWeight: 'bold',
+        border: '1px solid #efe0cd'
+      }
+    });
+
+    try {
+      // Usar recalculateEverything para garantir que clientes também sejam atualizados se necessário
+      // Mas o usuário pediu especificamente recalculateAllProducts. Vou usar recalculateAllProducts
+      // para ser fiel ao pedido, mas garantindo que ele seja visível.
+      await dataService.recalculateAllProducts();
+      
+      // Invalida todos os caches para garantir que as telas mostrem dados novos
+      cacheService.invalidateCache();
+      
+      // Atualiza os contadores das notificações
+      await fetchNotificationData();
+      
+      toast.success('Sincronização concluída com sucesso! ✨', { id: loadingToast });
+    } catch (error: any) {
+      console.error('Erro no recálculo global:', error);
+      toast.error(`Falha na sincronização: ${error.message}`, { id: loadingToast });
+    } finally {
+      setIsRecalculating(false);
+    }
+  };
 
   const handleSignOut = async () => {
     try {
@@ -122,34 +176,49 @@ export const Layout = () => {
             <div className="relative">
               <button 
                 onClick={() => {
-                  if (criticalStockCount > 0) {
-                    toast(`Existem ${criticalStockCount} insumos com estoque crítico!`, {
-                      icon: '⚠️',
-                      duration: 4000,
+                  const totalNotifications = criticalStockCount + openOrdersCount + noCategoryCount;
+                  
+                  if (totalNotifications > 0) {
+                    let message = 'Resumo de Atenção:\n';
+                    if (criticalStockCount > 0) message += `• ${criticalStockCount} insumo(s) com estoque crítico\n`;
+                    if (openOrdersCount > 0) message += `• ${openOrdersCount} pedido(s) em aberto\n`;
+                    if (noCategoryCount > 0) message += `• ${noCategoryCount} produto(s) sem categoria\n`;
+
+                    toast(message.trim(), {
+                      icon: '🔔',
+                      duration: 5000,
                       style: {
                         borderRadius: '12px',
                         background: '#fff',
                         color: '#6a4a2b',
-                        fontWeight: 'bold',
-                        border: '1px solid #efe0cd'
+                        fontWeight: '600',
+                        fontSize: '13px',
+                        border: '1px solid #efe0cd',
+                        whiteSpace: 'pre-line'
                       }
                     });
                   } else {
-                    toast.success('Todos os insumos estão com estoque em dia!');
+                    toast.success('Tudo em ordem por aqui! ✨');
                   }
                 }}
                 className="p-2 text-on-surface-variant hover:bg-slate-50 rounded-full transition-all relative"
+                title="Notificações"
               >
                 <Bell size={20} />
-                {criticalStockCount > 0 && (
+                {(criticalStockCount + openOrdersCount + noCategoryCount) > 0 && (
                   <span className="absolute top-1 right-1 w-4 h-4 bg-error text-white text-[10px] font-bold rounded-full flex items-center justify-center animate-bounce">
-                    {criticalStockCount}
+                    {criticalStockCount + openOrdersCount + noCategoryCount}
                   </span>
                 )}
               </button>
             </div>
-            <button className="p-2 text-on-surface-variant hover:bg-slate-50 rounded-full transition-all">
-              <History size={20} />
+            <button 
+              onClick={handleGlobalRecalculate}
+              disabled={isRecalculating}
+              className={`p-2 text-on-surface-variant hover:bg-slate-50 rounded-full transition-all ${isRecalculating ? 'opacity-50 cursor-not-allowed' : ''}`}
+              title="Sincronizar dados e recalcular custos globais"
+            >
+              <History size={20} className={isRecalculating ? 'animate-spin text-primary' : ''} />
             </button>
             <div className="h-8 w-px bg-surface-container-high mx-2"></div>
             <div className="flex items-center gap-3 pl-2">
