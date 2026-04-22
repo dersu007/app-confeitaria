@@ -167,10 +167,6 @@ export const sanitizeProductUpdate = (productData: any) => {
   // Apply fallbacks to the input data if needed
   const dataWithFallbacks = { ...productData };
   
-  // Only apply defaults if the field is explicitly provided as empty or if we want to ensure a specific type
-  // But DO NOT set defaults for fields that are missing from the input object, 
-  // as this causes data loss during partial updates (like recalculateProduct)
-  
   if (dataWithFallbacks.imagem_url === '') {
     dataWithFallbacks.imagem_url = null;
   }
@@ -190,4 +186,26 @@ export const sanitizeProductUpdate = (productData: any) => {
   });
 
   return sanitized;
+};
+
+export const validateProductIntegrity = (product: Produto): string[] => {
+  const errors: string[] = [];
+
+  if (!product.categoria_id) {
+    errors.push("Categoria não definida");
+  }
+
+  if (product.margem_real_calculada <= 0) {
+    errors.push("Margem de lucro negativa ou zero");
+  }
+
+  if (!product.ingredientes || product.ingredientes.length === 0) {
+    errors.push("Ficha técnica vazia");
+  }
+
+  if (Number(product.rendimento_unidades) <= 0) {
+    errors.push("Rendimento não configurado");
+  }
+
+  return errors;
 };

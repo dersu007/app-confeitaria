@@ -17,13 +17,16 @@ import {
   History,
   LogOut,
   RefreshCw,
-  AlertTriangle
+  AlertTriangle,
+  ExternalLink,
+  ChevronRight
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useAuth } from '../lib/auth';
 import { dataService } from '../services/dataService';
 import { cacheService } from '../services/cacheService';
-import { Ingrediente } from '../types';
+import { validateProductIntegrity } from '../services/bakeryService';
+import { Ingrediente, Produto } from '../types';
 
 const SidebarLink = ({ to, icon: Icon, children }: { to: string, icon: any, children: React.ReactNode }) => (
   <NavLink 
@@ -45,8 +48,9 @@ export const Layout = () => {
   const navigate = useNavigate();
   const [criticalStockCount, setCriticalStockCount] = React.useState(0);
   const [openOrdersCount, setOpenOrdersCount] = React.useState(0);
-  const [noCategoryCount, setNoCategoryCount] = React.useState(0);
+  const [integrityIssues, setIntegrityIssues] = React.useState<{product: Produto, errors: string[]}[]>([]);
   const [isRecalculating, setIsRecalculating] = React.useState(false);
+  const [showNotifications, setShowNotifications] = React.useState(false);
 
   const fetchNotificationData = async () => {
     try {
@@ -60,9 +64,11 @@ export const Layout = () => {
       const stockCount = ingredients.filter(i => (i.estoque_atual || 0) <= (i.estoque_minimo || 0)).length;
       setCriticalStockCount(stockCount);
 
-      // 2. Produtos Sem Categoria
-      const noCatCount = products.filter(p => !p.categoria_id).length;
-      setNoCategoryCount(noCatCount);
+      // 2. Integridade de Produtos
+      const integrityIssues = products
+        .map(p => ({ product: p, errors: validateProductIntegrity(p) }))
+        .filter(item => item.errors.length > 0);
+      setIntegrityIssues(integrityIssues);
 
       // 3. Pedidos Abertos (Status diferente de Concluído e Cancelado)
       const openCount = orders.filter(o => o.status !== 'Concluído' && o.status !== 'Cancelado').length;
@@ -175,42 +181,131 @@ export const Layout = () => {
           <div className="flex items-center gap-2">
             <div className="relative">
               <button 
-                onClick={() => {
-                  const totalNotifications = criticalStockCount + openOrdersCount + noCategoryCount;
-                  
-                  if (totalNotifications > 0) {
-                    let message = 'Resumo de Atenção:\n';
-                    if (criticalStockCount > 0) message += `• ${criticalStockCount} insumo(s) com estoque crítico\n`;
-                    if (openOrdersCount > 0) message += `• ${openOrdersCount} pedido(s) em aberto\n`;
-                    if (noCategoryCount > 0) message += `• ${noCategoryCount} produto(s) sem categoria\n`;
-
-                    toast(message.trim(), {
-                      icon: '🔔',
-                      duration: 5000,
-                      style: {
-                        borderRadius: '12px',
-                        background: '#fff',
-                        color: '#6a4a2b',
-                        fontWeight: '600',
-                        fontSize: '13px',
-                        border: '1px solid #efe0cd',
-                        whiteSpace: 'pre-line'
-                      }
-                    });
-                  } else {
-                    toast.success('Tudo em ordem por aqui! ✨');
-                  }
-                }}
-                className="p-2 text-on-surface-variant hover:bg-slate-50 rounded-full transition-all relative"
+                onClick={() => setShowNotifications(!showNotifications)}
+                className={`p-2 text-on-surface-variant hover:bg-slate-50 rounded-full transition-all relative ${showNotifications ? 'bg-slate-50 text-primary' : ''}`}
                 title="Notificações"
               >
                 <Bell size={20} />
-                {(criticalStockCount + openOrdersCount + noCategoryCount) > 0 && (
+                {(criticalStockCount + openOrdersCount + integrityIssues.length) > 0 && (
                   <span className="absolute top-1 right-1 w-4 h-4 bg-error text-white text-[10px] font-bold rounded-full flex items-center justify-center animate-bounce">
-                    {criticalStockCount + openOrdersCount + noCategoryCount}
+                    {criticalStockCount + openOrdersCount + integrityIssues.length}
                   </span>
                 )}
               </button>
+
+              {/* Notifications Dropdown */}
+              {showNotifications && (
+                <>
+                  <div 
+                    className="fixed inset-0 z-40" 
+                    onClick={() => setShowNotifications(false)}
+                  ></div>
+                  <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl shadow-2xl border border-surface-container-high z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="p-4 bg-surface-container-low/50 border-b border-surface-container-high flex justify-between items-center">
+                      <h3 className="font-bold headline text-on-surface text-sm">Notificações</h3>
+                      <span className="text-[10px] uppercase font-bold text-on-surface-variant px-2 py-0.5 bg-surface-container-high rounded-full">
+                        {criticalStockCount + openOrdersCount + integrityIssues.length} Alertas
+                      </span>
+                    </div>
+
+                    <div className="max-h-96 overflow-y-auto">
+                      {/* Integrity Issues - Priority */}
+                      {integrityIssues.map((item) => (
+                        <div 
+                          key={item.product.id}
+                          className="p-4 hover:bg-surface-container-low transition-colors border-b border-surface-container-high last:border-0"
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="p-2 bg-error/10 text-error rounded-lg shrink-0">
+                              <AlertTriangle size={16} />
+                            </div>
+                            <div className="flex-grow min-w-0">
+                              <p className="text-xs font-bold text-on-surface truncate">
+                                {item.product.nome}
+                              </p>
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {item.errors.map((err, i) => (
+                                  <span key={i} className="text-[9px] font-medium text-error bg-error/5 px-1.5 py-0.5 rounded">
+                                    {err}
+                                  </span>
+                                ))}
+                              </div>
+                              <button 
+                                onClick={() => {
+                                  setShowNotifications(false);
+                                  navigate(`/produtos?edit=${item.product.id}`);
+                                }}
+                                className="mt-2 flex items-center gap-1 text-[10px] font-bold text-primary hover:underline"
+                              >
+                                <ExternalLink size={10} /> Corrigir agora
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+
+                      {/* Stock Alerts */}
+                      {criticalStockCount > 0 && (
+                        <div className="p-4 hover:bg-surface-container-low transition-colors border-b border-surface-container-high bg-amber-50/30">
+                          <div className="flex items-start gap-3">
+                            <div className="p-2 bg-amber-100 text-amber-700 rounded-lg shrink-0">
+                              <Database size={16} />
+                            </div>
+                            <div>
+                              <p className="text-xs font-bold text-on-surface">Estoque Crítico</p>
+                              <p className="text-[10px] text-on-surface-variant mt-0.5">
+                                {criticalStockCount} insumos abaixo do estoque mínimo.
+                              </p>
+                              <button 
+                                onClick={() => {
+                                  setShowNotifications(false);
+                                  navigate('/insumos');
+                                }}
+                                className="mt-2 flex items-center gap-1 text-[10px] font-bold text-amber-700 hover:underline"
+                              >
+                                Ver insumos <ChevronRight size={10} />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Open Orders */}
+                      {openOrdersCount > 0 && (
+                        <div className="p-4 hover:bg-surface-container-low transition-colors border-b border-surface-container-high">
+                          <div className="flex items-start gap-3">
+                            <div className="p-2 bg-blue-50 text-blue-600 rounded-lg shrink-0">
+                              <ShoppingCart size={16} />
+                            </div>
+                            <div>
+                              <p className="text-xs font-bold text-on-surface">Pedidos em Aberto</p>
+                              <p className="text-[10px] text-on-surface-variant mt-0.5">
+                                Você tem {openOrdersCount} pedido(s) aguardando processamento.
+                              </p>
+                              <button 
+                                onClick={() => {
+                                  setShowNotifications(false);
+                                  navigate('/pedidos');
+                                }}
+                                className="mt-2 text-[10px] font-bold text-blue-600 hover:underline"
+                              >
+                                Ver fila de pedidos
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {criticalStockCount === 0 && openOrdersCount === 0 && integrityIssues.length === 0 && (
+                        <div className="p-8 text-center">
+                          <Sparkles size={32} className="mx-auto text-primary/30 mb-2" />
+                          <p className="text-xs text-on-surface-variant font-medium">Tudo em ordem por aqui!</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
             <button 
               onClick={handleGlobalRecalculate}

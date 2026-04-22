@@ -9,8 +9,10 @@ import {
   Package,
   Users,
   Loader2,
-  Calendar
+  Calendar,
+  FileBarChart
 } from 'lucide-react';
+import { toast } from 'react-hot-toast';
 import { 
   BarChart, 
   Bar, 
@@ -74,6 +76,7 @@ export const Dashboard = () => {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [despesas, setDespesas] = useState<DespesaFixa[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isExporting, setIsExporting] = useState(false);
   const [periodoVisao, setPeriodoVisao] = useState<PeriodoVisao>('Diário');
 
   useEffect(() => {
@@ -259,6 +262,61 @@ export const Dashboard = () => {
 
   const lowMarginProducts = produtos.filter(p => p.margem_real_calculada < 40);
 
+  const exportDashboardReport = async () => {
+    setIsExporting(true);
+    try {
+      const now = new Date();
+      const monthName = format(now, 'MMMM', { locale: ptBR });
+      const year = format(now, 'yyyy');
+      const BOM = '\uFEFF';
+      const sep = ';';
+
+      let csvContent = "";
+
+      // Seção 1: Resumo Financeiro
+      csvContent += "SEÇÃO 1: RESUMO FINANCEIRO\n";
+      csvContent += `KPI${sep}Valor\n`;
+      csvContent += `Faturamento Mensal${sep}${stats.faturamentoMensal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}\n`;
+      csvContent += `Lucro Líquido${sep}${stats.lucroLiquido.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}\n`;
+      csvContent += `Ticket Médio${sep}${stats.ticketMedio.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}\n`;
+      csvContent += `Pedidos Ativos${sep}${stats.pedidosAtivos}\n\n`;
+
+      // Seção 2: Performance por Categoria
+      csvContent += "SEÇÃO 2: PERFORMANCE POR CATEGORIA\n";
+      csvContent += `Categoria${sep}Faturamento${sep}Percentual\n`;
+      categoryDistribution.forEach(cat => {
+        csvContent += `${cat.name}${sep}${cat.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}${sep}${cat.percentage}%\n`;
+      });
+      csvContent += "\n";
+
+      // Seção 3: Histórico de Vendas
+      csvContent += `SEÇÃO 3: HISTÓRICO DE VENDAS (${periodoVisao})\n`;
+      csvContent += `Período${sep}Faturamento\n`;
+      salesEvolution.forEach(item => {
+        csvContent += `${item.name}${sep}${item.faturamento.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}\n`;
+      });
+
+      const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const fileName = `relatorio_gestao_honey_sugar_${monthName.toLowerCase()}_${year}.csv`;
+      
+      link.setAttribute('href', url);
+      link.setAttribute('download', fileName);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      toast.success('Relatório gerado com sucesso!');
+    } catch (error) {
+      console.error('Erro ao exportar relatório:', error);
+      toast.error('Erro ao gerar relatório.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
@@ -270,6 +328,22 @@ export const Dashboard = () => {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
+      {/* Header with Export */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-3xl font-black text-on-surface headline">Dashboard</h1>
+          <p className="text-on-surface-variant text-sm font-medium">Gestão inteligente e análise de resultados</p>
+        </div>
+        <button 
+          onClick={exportDashboardReport}
+          disabled={isExporting}
+          className="flex items-center gap-2 px-6 py-3 bg-primary text-white font-bold rounded-2xl hover:bg-primary/90 transition-all shadow-xl shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isExporting ? <Loader2 size={18} className="animate-spin" /> : <FileBarChart size={18} />}
+          Baixar Relatório
+        </button>
+      </div>
+
       {/* Summary Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <KPICard title="Pedidos Ativos" value={stats.pedidosAtivos} icon={Receipt} />

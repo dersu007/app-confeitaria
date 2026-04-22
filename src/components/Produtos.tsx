@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { dataService } from '../services/dataService';
 import { 
   Plus, 
@@ -21,11 +22,12 @@ import {
   Loader2,
   Copy,
   LayoutGrid,
-  List
+  List,
+  AlertTriangle
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Produto, Categoria, ProdutoIngrediente } from '../types';
-import { formatCurrency, calculateUnitCost, calculateProductPricing } from '../services/bakeryService';
+import { formatCurrency, calculateUnitCost, calculateProductPricing, validateProductIntegrity } from '../services/bakeryService';
 import { PieChart as RePieChart, Pie, Cell, ResponsiveContainer, Tooltip as ReTooltip } from 'recharts';
 import { ProductModal } from './Produtos/ProductModal';
 import { DEFAULT_PRODUCT_IMAGE } from '../constants';
@@ -33,10 +35,12 @@ import { ConfirmDialog } from './ui/ConfirmDialog';
 import { exportToCSV } from '../utils/csvUtils';
 
 export const Produtos = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [showCriticalOnly, setShowCriticalOnly] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Produto | null>(null);
   const [showDetail, setShowDetail] = useState(false);
   const [productIngredients, setProductIngredients] = useState<ProdutoIngrediente[]>([]);
@@ -47,10 +51,30 @@ export const Produtos = () => {
   const [productToDelete, setProductToDelete] = useState<Produto | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
 
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Handle URL edit parameter
+  useEffect(() => {
+    if (produtos.length > 0) {
+      const editId = searchParams.get('edit');
+      if (editId) {
+        const product = produtos.find(p => p.id === editId);
+        if (product) {
+          setProductToEdit(product);
+          setShowModal(true);
+          // Sync URL: instead of deleting, just ensure we don't loop
+          // Actually, removing it is cleaner for the user
+          const nextParams = new URLSearchParams(searchParams);
+          nextParams.delete('edit');
+          setSearchParams(nextParams, { replace: true });
+        }
+      }
+    }
+  }, [produtos, searchParams]);
 
   const handleExportCSV = () => {
     setIsExporting(true);
@@ -181,9 +205,20 @@ export const Produtos = () => {
     }
   };
 
-  const filteredProdutos = produtos.filter(p => 
-    p.nome.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredProdutos = useMemo(() => {
+    return produtos.filter(p => {
+      const searchLower = searchTerm.toLowerCase();
+      const matchesSearch = p.nome.toLowerCase().includes(searchLower) || 
+                           (p.modo_preparo?.toLowerCase().includes(searchLower));
+      
+      const matchesCategory = selectedCategory === 'all' || p.categoria_id === selectedCategory;
+      
+      const isCritical = validateProductIntegrity(p).length > 0;
+      const matchesCritical = !showCriticalOnly || isCritical;
+
+      return matchesSearch && matchesCategory && matchesCritical;
+    });
+  }, [produtos, searchTerm, showCriticalOnly, selectedCategory]);
 
   const getCategoryName = (catId: string) => {
     return categorias.find(c => c.id === catId)?.nome || 'Sem Categoria';
@@ -280,15 +315,44 @@ export const Produtos = () => {
         </div>
       </div>
 
-      <div className="flex items-center gap-4 bg-surface-container-low px-4 py-3 rounded-xl border border-surface-container-high">
-        <Search size={20} className="text-on-surface-variant" />
-        <input 
-          type="text" 
-          placeholder="Buscar produtos..." 
-          className="bg-transparent border-none focus:ring-0 text-sm w-full"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-        />
+      <div className="flex flex-col md:flex-row items-stretch md:items-center gap-4 bg-surface-container-low px-4 py-3 rounded-xl border border-surface-container-high">
+        <div className="flex items-center gap-3 flex-grow">
+          <Search size={20} className="text-on-surface-variant" />
+          <input 
+            type="text" 
+            placeholder="Buscar produtos ou descrição..." 
+            className="bg-transparent border-none focus:ring-0 text-sm flex-grow"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+        
+        <div className="flex items-center gap-3">
+          <div className="h-6 w-px bg-surface-container-high hidden md:block"></div>
+          
+          <select
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
+            className="bg-white border-none rounded-lg text-xs font-bold text-on-surface-variant px-3 py-2 shadow-sm focus:ring-2 focus:ring-primary/20 appearance-none cursor-pointer"
+            style={{ backgroundImage: 'none' }}
+          >
+            <option value="all">Todas as Categorias</option>
+            {categorias.map(cat => (
+              <option key={cat.id} value={cat.id}>{cat.nome}</option>
+            ))}
+          </select>
+
+          <div className="h-6 w-px bg-surface-container-high"></div>
+          
+          <button
+            onClick={() => setShowCriticalOnly(!showCriticalOnly)}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-all shrink-0 ${showCriticalOnly ? 'bg-error text-white shadow-sm' : 'text-on-surface-variant hover:bg-surface-container-high'}`}
+          >
+            <AlertTriangle size={14} className={showCriticalOnly ? '' : 'text-error'} />
+            <span className="hidden sm:inline">⚠️ Necessita Correção</span>
+            <span className="sm:hidden">Correção</span>
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -314,6 +378,16 @@ export const Produtos = () => {
                     (e.target as HTMLImageElement).src = DEFAULT_PRODUCT_IMAGE;
                   }}
                 />
+                
+                {validateProductIntegrity(produto).length > 0 && (
+                  <div 
+                    className="absolute top-3 left-3 p-1.5 bg-white/90 backdrop-blur-sm rounded-full text-error border border-error/20 shadow-sm animate-pulse"
+                    title={`Erros:\n${validateProductIntegrity(produto).join('\n')}`}
+                  >
+                    <AlertTriangle size={16} />
+                  </div>
+                )}
+
                 <div className="absolute top-3 right-3 flex flex-col gap-2 scale-0 group-hover:scale-100 transition-transform origin-right duration-300">
                   <div className="px-2 py-1 bg-white/90 backdrop-blur-sm rounded-lg text-[10px] font-bold text-primary border border-primary/20 text-center shadow-sm">
                     {getCategoryName(produto.categoria_id)}
@@ -386,20 +460,30 @@ export const Produtos = () => {
                     <tr 
                       key={produto.id} 
                       onClick={() => handleProductClick(produto)}
-                      className="hover:bg-surface-container-low/30 transition-colors group cursor-pointer"
+                      className={`hover:bg-surface-container-low/30 transition-colors group cursor-pointer ${validateProductIntegrity(produto).length > 0 ? 'bg-error/5' : ''}`}
                     >
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-4">
-                          <div className="w-10 h-10 rounded-lg overflow-hidden bg-surface-container-low flex-shrink-0">
+                          <div className="w-10 h-10 rounded-lg overflow-hidden bg-surface-container-low flex-shrink-0 relative">
                             <img 
                               src={produto.imagem_url || DEFAULT_PRODUCT_IMAGE} 
                               alt={produto.nome}
                               className="w-full h-full object-cover"
                               referrerPolicy="no-referrer"
                             />
+                            {validateProductIntegrity(produto).length > 0 && (
+                              <div className="absolute inset-0 bg-error/20 flex items-center justify-center">
+                                <AlertTriangle size={16} className="text-error" />
+                              </div>
+                            )}
                           </div>
                           <div>
-                            <p className="font-bold text-on-surface text-sm sm:text-base">{produto.nome}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="font-bold text-on-surface text-sm sm:text-base">{produto.nome}</p>
+                              {validateProductIntegrity(produto).length > 0 && (
+                                <AlertTriangle size={14} className="text-error" title={validateProductIntegrity(produto).join('\n')} />
+                              )}
+                            </div>
                             <p className="text-[10px] text-on-surface-variant italic">Rend: {produto.rendimento_unidades} un</p>
                           </div>
                         </div>
@@ -460,9 +544,26 @@ export const Produtos = () => {
       )}
 
       {filteredProdutos.length === 0 && !loading && (
-        <div className="text-center py-20 bg-surface-container-low rounded-3xl border-2 border-dashed border-surface-container-high">
+        <div className="text-center py-20 bg-surface-container-low rounded-3xl border-2 border-dashed border-surface-container-high animate-in fade-in duration-500">
           <Package size={48} className="mx-auto text-on-surface-variant/30 mb-4" />
-          <p className="text-on-surface-variant">Nenhum produto encontrado.</p>
+          <h3 className="text-lg font-bold text-on-surface mb-1">Nenhum produto encontrado</h3>
+          <p className="text-on-surface-variant text-sm max-w-xs mx-auto">
+            {selectedCategory !== 'all' 
+              ? "Não existem itens cadastrados nesta categoria com os filtros atuais." 
+              : "Tente ajustar sua busca ou filtros para encontrar o que procura."}
+          </p>
+          {(searchTerm || selectedCategory !== 'all' || showCriticalOnly) && (
+            <button 
+              onClick={() => {
+                setSearchTerm('');
+                setSelectedCategory('all');
+                setShowCriticalOnly(false);
+              }}
+              className="mt-6 text-primary font-bold text-sm hover:underline"
+            >
+              Limpar todos os filtros
+            </button>
+          )}
         </div>
       )}
 

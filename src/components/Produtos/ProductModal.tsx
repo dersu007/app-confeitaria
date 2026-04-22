@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { dataService } from '../../services/dataService';
 import { useAuth } from '../../lib/auth';
 import { Produto, Categoria } from '../../types';
 import { X, Plus, Package, Image, Clock, Calculator, Save, Weight, DollarSign, Upload, Loader2, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { formatCurrency, calculateProductPricing, calculateUnitCost, resolveProductMargin } from '../../services/bakeryService';
+import { formatCurrency, calculateProductPricing, calculateUnitCost, resolveProductMargin, validateProductIntegrity } from '../../services/bakeryService';
 import { FichaTecnica } from '../FichaTecnica';
 import { DEFAULT_PRODUCT_IMAGE, DEFAULT_CUSTO_HORA } from '../../constants';
+import { AlertTriangle } from 'lucide-react';
 
 interface ProductModalProps {
   produto?: Produto | null;
@@ -141,6 +142,19 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
   };
 
   const [productToEditState, setProductToEditState] = useState<Produto | null>(produto || null);
+
+  const integrityErrors = useMemo(() => {
+    if (!productToEditState) return [];
+    // Construct a temporary product object with current state to validate in real-time
+    const tempProduct = {
+      ...productToEditState,
+      categoria_id: categoriaId,
+      rendimento_unidades: rendimentoUnidades,
+      margem_real_calculada: margemRealCalculada,
+      ingredientes: productToEditState.ingredientes || []
+    };
+    return validateProductIntegrity(tempProduct as any);
+  }, [productToEditState, categoriaId, rendimentoUnidades, margemRealCalculada, productToEditState?.ingredientes]);
 
   useEffect(() => {
     setProductToEditState(produto || null);
@@ -281,13 +295,18 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
                   <select 
                     value={categoriaId}
                     onChange={e => setCategoriaId(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
+                    className={`w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 ${!categoriaId ? 'ring-1 ring-error/50' : ''}`}
                   >
                     <option value="">Sem Categoria</option>
                     {categorias.map(c => (
                       <option key={c.id} value={c.id}>{c.nome}</option>
                     ))}
                   </select>
+                  {!categoriaId && (
+                    <p className="text-[9px] text-error font-medium flex items-center gap-1 mt-1">
+                      <AlertTriangle size={10} /> Categoria obrigatória para o sistema
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -322,8 +341,13 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
                     type="number"
                     value={rendimentoUnidades}
                     onChange={e => setRendimentoUnidades(Number(e.target.value))}
-                    className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
+                    className={`w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 ${rendimentoUnidades <= 0 ? 'ring-1 ring-error/50' : ''}`}
                   />
+                  {rendimentoUnidades <= 0 && (
+                    <p className="text-[9px] text-error font-medium flex items-center gap-1 mt-1">
+                      <AlertTriangle size={10} /> Rendimento deve ser maior que zero
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -459,9 +483,14 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
                 />
               </div>
 
-              <div className="p-4 bg-surface-container-low/50 rounded-2xl border border-surface-container-high">
+              <div className={`p-4 rounded-2xl border transition-all ${(!productToEditState?.ingredientes || productToEditState.ingredientes.length === 0) ? 'bg-error/5 border-error/20' : 'bg-surface-container-low/50 border-surface-container-high'}`}>
                 <div className="flex justify-between items-center mb-3">
-                  <h4 className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Ficha Técnica (Ingredientes)</h4>
+                  <h4 className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest flex items-center gap-1.5">
+                    Ficha Técnica (Ingredientes)
+                    {(!productToEditState?.ingredientes || productToEditState.ingredientes.length === 0) && (
+                      <span className="text-error"><AlertTriangle size={12} /></span>
+                    )}
+                  </h4>
                   <button 
                     type="button"
                     onClick={handleOpenFichaTecnica}
@@ -480,6 +509,11 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
                     <span className="text-sm font-bold text-primary">{formatCurrency(currentUnitCost)}</span>
                   </div>
                 </div>
+                {(!productToEditState?.ingredientes || productToEditState.ingredientes.length === 0) && productToEditState?.id && (
+                  <p className="text-[9px] text-error font-medium mt-2 italic flex items-center gap-1">
+                    <AlertTriangle size={10} /> Produtos sem ingredientes não calculam custo corretamente.
+                  </p>
+                )}
                 {!produto?.id && (
                   <p className="text-[10px] text-on-surface-variant mt-2 italic">Salve o produto primeiro para adicionar ingredientes.</p>
                 )}
@@ -573,10 +607,16 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
 
                 <div className="pt-6 border-t border-surface-container-high flex justify-between items-end">
                   <div>
-                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block mb-1">Margem Real Calculada</span>
+                    <div className="flex items-center gap-1 mb-1">
+                      <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block">Margem Real Calculada</span>
+                      {margemRealCalculada <= 0 && <AlertTriangle size={12} className="text-error" />}
+                    </div>
                     <span className={`text-xl font-bold ${margemRealCalculada >= 40 ? 'text-primary' : 'text-error'}`}>
                       {margemRealCalculada.toFixed(1)}%
                     </span>
+                    {margemRealCalculada <= 0 && (
+                      <p className="text-[9px] text-error font-bold mt-1">⚠️ Prejuízo detectado!</p>
+                    )}
                     <p className="text-[9px] text-on-surface-variant italic mt-1 max-w-[180px]">
                       Lucro da empresa após descontar todos os custos, inclusive seu salário.
                     </p>

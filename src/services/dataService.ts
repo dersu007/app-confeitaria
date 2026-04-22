@@ -236,7 +236,7 @@ class DataService {
     return this.getWithCache('produtos', async () => {
       const { data, error } = await supabase
         .from('produtos')
-        .select('*, categoria:categorias!categoria_id(*)')
+        .select('*, categoria:categorias!categoria_id(*), ingredientes:produto_ingredientes(*)')
         .order('nome');
       if (error) throw error;
       return data || [];
