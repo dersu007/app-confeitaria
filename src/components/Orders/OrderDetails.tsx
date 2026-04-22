@@ -139,7 +139,13 @@ export const OrderDetails = ({ pedido, onClose, onEdit, onDelete }: OrderDetails
                   {pedido.prioridade}
                 </span>
               </div>
-              <p className="text-xs text-on-surface-variant mt-1.5">Estimativa: {pedido.tempo_estimado || 'N/A'}</p>
+              <p className="text-xs text-on-surface-variant mt-1.5 font-bold flex items-center gap-1.5">
+                <Calendar size={12} className="text-primary" />
+                Entrega: {format(parseISO(pedido.data_entrega), "dd/MM/yyyy")}
+              </p>
+              {pedido.tempo_estimado && (
+                <p className="text-[10px] text-on-surface-variant mt-1 italic">Obs: {pedido.tempo_estimado}</p>
+              )}
             </div>
             <div className="bg-primary/5 p-5 rounded-3xl border border-primary/10">
               <p className="text-[10px] font-bold text-primary uppercase tracking-widest mb-1 flex items-center gap-1.5">

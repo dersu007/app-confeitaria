@@ -14,7 +14,8 @@ import {
   ChevronRight,
   Clock,
   Package,
-  AlertCircle
+  AlertCircle,
+  Calendar as CalendarIcon
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { formatCurrency } from '../services/bakeryService';
@@ -23,12 +24,13 @@ import { ptBR } from 'date-fns/locale';
 import { KanbanBoard } from './Orders/KanbanBoard';
 import { OrderModal } from './Orders/OrderModal';
 import { OrderDetails } from './Orders/OrderDetails';
+import { CalendarView } from './Orders/CalendarView';
 import { exportToCSV } from '../utils/csvUtils';
 
 export const Pedidos = () => {
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban');
+  const [viewMode, setViewMode] = useState<'kanban' | 'list' | 'calendar'>('kanban');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('Todos');
   
@@ -47,11 +49,11 @@ export const Pedidos = () => {
     try {
       const mappedData = pedidos.map(p => ({
         id: p.id,
-        data: format(parseISO(p.data_pedido), 'dd/MM/yyyy HH:mm'),
+        data_pedido: format(parseISO(p.data_pedido), 'dd/MM/yyyy HH:mm'),
+        data_entrega: format(parseISO(p.data_entrega), 'dd/MM/yyyy'),
         cliente: p.cliente?.nome || 'Cliente Removido',
         status: p.status,
         prioridade: p.prioridade || 'Normal',
-        tempo_estimado: p.tempo_estimado ? p.tempo_estimado : '-',
         valor_total: p.valor_total,
         observacoes: (p.observacoes || '').replace(/\n/g, ' ')
       }));
@@ -60,11 +62,11 @@ export const Pedidos = () => {
         mappedData,
         {
           id: 'ID do Pedido',
-          data: 'Data do Pedido',
+          data_pedido: 'Data do Pedido',
+          data_entrega: 'Data de Entrega',
           cliente: 'Nome do Cliente',
           status: 'Status',
           prioridade: 'Prioridade',
-          tempo_estimado: 'Tempo Estimado',
           valor_total: 'Valor Total',
           observacoes: 'Observações'
         },
@@ -158,6 +160,12 @@ export const Pedidos = () => {
             >
               <List size={18} />
             </button>
+            <button 
+              onClick={() => setViewMode('calendar')}
+              className={`p-2 rounded-lg transition-all ${viewMode === 'calendar' ? 'bg-white shadow-sm text-primary' : 'text-on-surface-variant hover:text-primary'}`}
+            >
+              <CalendarIcon size={18} />
+            </button>
           </div>
           <button 
             onClick={handleExportCSV}
@@ -226,6 +234,13 @@ export const Pedidos = () => {
               onOrderClick={(p) => { setSelectedPedido(p); setShowDetails(true); }}
             />
           </div>
+        ) : viewMode === 'calendar' ? (
+          <div className="h-full">
+            <CalendarView 
+              pedidos={filteredPedidos}
+              onOrderClick={(p) => { setSelectedPedido(p); setShowDetails(true); }}
+            />
+          </div>
         ) : (
           <div className="bg-surface-container-lowest rounded-2xl border border-surface-container-high shadow-sm overflow-hidden">
             <table className="w-full text-left border-collapse">
@@ -233,6 +248,7 @@ export const Pedidos = () => {
                 <tr className="bg-surface-container-low/50 border-b border-surface-container-high">
                   <th className="px-6 py-4 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Pedido</th>
                   <th className="px-6 py-4 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Cliente</th>
+                  <th className="px-6 py-4 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Entrega</th>
                   <th className="px-6 py-4 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Status</th>
                   <th className="px-6 py-4 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest text-center">Itens</th>
                   <th className="px-6 py-4 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Total</th>
@@ -258,6 +274,12 @@ export const Pedidos = () => {
                           </div>
                           <p className="font-bold text-on-surface text-sm">{pedido.cliente?.nome}</p>
                         </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <p className="font-bold text-xs text-on-surface flex items-center gap-2">
+                          <CalendarIcon size={12} className="text-primary" />
+                          {format(parseISO(pedido.data_entrega), 'dd/MM/yyyy')}
+                        </p>
                       </td>
                       <td className="px-6 py-4">
                         <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${getStatusBadge(pedido.status)}`}>

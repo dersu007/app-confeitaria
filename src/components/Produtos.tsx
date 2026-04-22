@@ -23,7 +23,9 @@ import {
   Copy,
   LayoutGrid,
   List,
-  AlertTriangle
+  AlertTriangle,
+  Archive,
+  ArchiveRestore
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Produto, Categoria, ProdutoIngrediente } from '../types';
@@ -52,6 +54,7 @@ export const Produtos = () => {
   const [isExporting, setIsExporting] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [viewStatus, setViewStatus] = useState<'ativos' | 'arquivados'>('ativos');
 
   useEffect(() => {
     fetchData();
@@ -205,6 +208,20 @@ export const Produtos = () => {
     }
   };
 
+  const handleArchiveProduct = async (e: React.MouseEvent, product: Produto) => {
+    e.stopPropagation();
+    const newStatus = !product.ativo;
+    const loadingToast = toast.loading(`${newStatus ? 'Ativando' : 'Arquivando'} produto...`);
+    try {
+      await dataService.saveProduto({ ...product, ativo: newStatus });
+      toast.success(`Produto ${newStatus ? 'ativado' : 'arquivado'} com sucesso!`, { id: loadingToast });
+      await fetchData();
+    } catch (error) {
+      console.error('Erro ao alternar status do produto:', error);
+      toast.error('Erro ao atualizar status do produto.', { id: loadingToast });
+    }
+  };
+
   const filteredProdutos = useMemo(() => {
     return produtos.filter(p => {
       const searchLower = searchTerm.toLowerCase();
@@ -216,17 +233,19 @@ export const Produtos = () => {
       const isCritical = validateProductIntegrity(p).length > 0;
       const matchesCritical = !showCriticalOnly || isCritical;
 
-      return matchesSearch && matchesCategory && matchesCritical;
+      const matchesStatus = viewStatus === 'ativos' ? (p.ativo !== false) : (p.ativo === false);
+
+      return matchesSearch && matchesCategory && matchesCritical && matchesStatus;
     });
-  }, [produtos, searchTerm, showCriticalOnly, selectedCategory]);
+  }, [produtos, searchTerm, showCriticalOnly, selectedCategory, viewStatus]);
 
   const getCategoryName = (catId: string) => {
     return categorias.find(c => c.id === catId)?.nome || 'Sem Categoria';
   };
 
-  if (showDetail && selectedProduct) {
-    return (
-      <>
+  return (
+    <div className="space-y-6">
+      {showDetail && selectedProduct ? (
         <ProductDetail 
           product={selectedProduct} 
           ingredients={productIngredients} 
@@ -246,325 +265,343 @@ export const Produtos = () => {
             await fetchData();
           }}
         />
-        {showModal && (
-          <ProductModal 
-            produto={productToEdit}
-            onClose={() => setShowModal(false)}
-            onDelete={async (id) => {
-              setProductToDelete(productToEdit);
-              setShowDeleteConfirm(true);
-              setShowModal(false);
-            }}
-            onSave={async () => {
-              setShowModal(false);
-              await fetchData();
-              
-              // Explicitly fetch the updated product to ensure UI is in sync
-              if (selectedProduct?.id) {
-                try {
-                  const data = await dataService.getProdutoById(selectedProduct.id);
-                  setSelectedProduct(data);
-                } catch (error) {
-                  console.error('Error refreshing product:', error);
-                }
-              }
-            }}
-          />
-        )}
-      </>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold headline text-on-surface">Produtos</h1>
-          <p className="text-sm text-on-surface-variant">Gerencie seu catálogo de produtos e precificação</p>
-        </div>
-        <div className="flex gap-3">
-          <div className="flex bg-surface-container-low p-1 rounded-xl border border-surface-container-high transition-all">
-            <button 
-              onClick={() => setViewMode('grid')}
-              className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-white shadow-sm text-primary' : 'text-on-surface-variant hover:text-primary'}`}
-              title="Visualização em Grade"
-            >
-              <LayoutGrid size={18} />
-            </button>
-            <button 
-              onClick={() => setViewMode('list')}
-              className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-primary' : 'text-on-surface-variant hover:text-primary'}`}
-              title="Visualização em Lista"
-            >
-              <List size={18} />
-            </button>
-          </div>
-          <button 
-            onClick={handleExportCSV}
-            disabled={isExporting}
-            className="hidden sm:flex items-center gap-2 bg-white text-on-surface px-4 py-3 rounded-xl font-bold border border-surface-container-high shadow-m hover:bg-surface-container-low transition-all text-sm disabled:opacity-50"
-          >
-            <Download size={18} /> Exportar CSV
-          </button>
-          <button 
-            onClick={handleAddProduct}
-            className="flex items-center gap-2 bg-primary text-white px-6 py-3 rounded-xl font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all text-sm"
-          >
-            <Plus size={20} /> Novo Produto
-          </button>
-        </div>
-      </div>
-
-      <div className="flex flex-col md:flex-row items-stretch md:items-center gap-4 bg-surface-container-low px-4 py-3 rounded-xl border border-surface-container-high">
-        <div className="flex items-center gap-3 flex-grow">
-          <Search size={20} className="text-on-surface-variant" />
-          <input 
-            type="text" 
-            placeholder="Buscar produtos ou descrição..." 
-            className="bg-transparent border-none focus:ring-0 text-sm flex-grow"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
-        
-        <div className="flex items-center gap-3">
-          <div className="h-6 w-px bg-surface-container-high hidden md:block"></div>
-          
-          <select
-            value={selectedCategory}
-            onChange={(e) => setSelectedCategory(e.target.value)}
-            className="bg-white border-none rounded-lg text-xs font-bold text-on-surface-variant px-3 py-2 shadow-sm focus:ring-2 focus:ring-primary/20 appearance-none cursor-pointer"
-            style={{ backgroundImage: 'none' }}
-          >
-            <option value="all">Todas as Categorias</option>
-            {categorias.map(cat => (
-              <option key={cat.id} value={cat.id}>{cat.nome}</option>
-            ))}
-          </select>
-
-          <div className="h-6 w-px bg-surface-container-high"></div>
-          
-          <button
-            onClick={() => setShowCriticalOnly(!showCriticalOnly)}
-            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-all shrink-0 ${showCriticalOnly ? 'bg-error text-white shadow-sm' : 'text-on-surface-variant hover:bg-surface-container-high'}`}
-          >
-            <AlertTriangle size={14} className={showCriticalOnly ? '' : 'text-error'} />
-            <span className="hidden sm:inline">⚠️ Necessita Correção</span>
-            <span className="sm:hidden">Correção</span>
-          </button>
-        </div>
-      </div>
-
-      {loading ? (
-        <div className="flex flex-col items-center justify-center py-20 gap-4">
-          <Loader2 size={40} className="text-primary animate-spin opacity-40" />
-          <p className="text-sm text-on-surface-variant font-medium">Carregando seu catálogo...</p>
-        </div>
-      ) : viewMode === 'grid' ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {filteredProdutos.map(produto => (
-            <div 
-              key={produto.id} 
-              onClick={() => handleProductClick(produto)}
-              className="bg-white rounded-2xl shadow-sm border border-surface-container-high hover:shadow-md transition-all group cursor-pointer overflow-hidden flex flex-col"
-            >
-              <div className="aspect-video bg-surface-container-low relative overflow-hidden">
-                <img 
-                  src={produto.imagem_url || DEFAULT_PRODUCT_IMAGE} 
-                  alt={produto.nome} 
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                  referrerPolicy="no-referrer"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).src = DEFAULT_PRODUCT_IMAGE;
-                  }}
-                />
-                
-                {validateProductIntegrity(produto).length > 0 && (
-                  <div 
-                    className="absolute top-3 left-3 p-1.5 bg-white/90 backdrop-blur-sm rounded-full text-error border border-error/20 shadow-sm animate-pulse"
-                    title={`Erros:\n${validateProductIntegrity(produto).join('\n')}`}
-                  >
-                    <AlertTriangle size={16} />
-                  </div>
-                )}
-
-                <div className="absolute top-3 right-3 flex flex-col gap-2 scale-0 group-hover:scale-100 transition-transform origin-right duration-300">
-                  <div className="px-2 py-1 bg-white/90 backdrop-blur-sm rounded-lg text-[10px] font-bold text-primary border border-primary/20 text-center shadow-sm">
-                    {getCategoryName(produto.categoria_id)}
-                  </div>
-                  <button 
-                    onClick={(e) => handleDuplicateProduct(e, produto)}
-                    className="p-2 bg-primary text-white rounded-lg shadow-lg hover:bg-primary/90 transition-all flex items-center justify-center border border-white/20"
-                    title="Duplicar Produto"
-                  >
-                    <Copy size={14} />
-                  </button>
-                </div>
+      ) : (
+        <>
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className="text-2xl font-bold headline text-on-surface">Produtos</h1>
+              <p className="text-sm text-on-surface-variant">Gerencie seu catálogo de produtos e precificação</p>
+            </div>
+            <div className="flex gap-3">
+              <div className="flex bg-surface-container-low p-1 rounded-xl border border-surface-container-high transition-all">
+                <button 
+                  onClick={() => setViewMode('grid')}
+                  className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-white shadow-sm text-primary' : 'text-on-surface-variant hover:text-primary'}`}
+                  title="Visualização em Grade"
+                >
+                  <LayoutGrid size={18} />
+                </button>
+                <button 
+                  onClick={() => setViewMode('list')}
+                  className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-primary' : 'text-on-surface-variant hover:text-primary'}`}
+                  title="Visualização em Lista"
+                >
+                  <List size={18} />
+                </button>
               </div>
+              <button 
+                onClick={handleExportCSV}
+                disabled={isExporting}
+                className="hidden sm:flex items-center gap-2 bg-white text-on-surface px-4 py-3 rounded-xl font-bold border border-surface-container-high shadow-m hover:bg-surface-container-low transition-all text-sm disabled:opacity-50"
+              >
+                <Download size={18} /> Exportar CSV
+              </button>
+              <button 
+                onClick={handleAddProduct}
+                className="flex items-center gap-2 bg-primary text-white px-6 py-3 rounded-xl font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all text-sm"
+              >
+                <Plus size={20} /> Novo Produto
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-col md:flex-row items-stretch md:items-center gap-4 bg-surface-container-low px-4 py-3 rounded-xl border border-surface-container-high">
+            <div className="flex items-center gap-3 flex-grow">
+              <Search size={20} className="text-on-surface-variant" />
+              <input 
+                type="text" 
+                placeholder="Buscar produtos ou descrição..." 
+                className="bg-transparent border-none focus:ring-0 text-sm flex-grow"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+            
+            <div className="flex items-center gap-3">
+              <div className="h-6 w-px bg-surface-container-high hidden md:block"></div>
               
-              <div className="p-5 flex-grow flex flex-col">
-                <h3 className="text-lg font-bold headline text-on-surface mb-1 truncate">{produto.nome}</h3>
-                <div className="flex items-center gap-2 text-[10px] text-on-surface-variant mb-4">
-                  <Clock size={12} />
-                  <span>{produto.tempo_producao_valor ? `${produto.tempo_producao_valor} ${produto.tempo_producao_unidade === 'horas' ? 'h' : 'min'}` : '--'}</span>
-                  <span className="mx-1">•</span>
-                  <span>{produto.rendimento_unidades} un</span>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4 pt-4 border-t border-surface-container-high">
-                  <div>
-                    <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Custo Unit.</span>
-                    <span className="text-sm font-bold text-on-surface">
-                      {formatCurrency(produto.custo_unitario || 0)}
-                    </span>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Preço Venda</span>
-                    <span className="text-lg font-bold text-primary">{formatCurrency(produto.preco_venda_final)}</span>
-                  </div>
-                </div>
-                
-                <div className="mt-4 flex items-center justify-between">
-                  <div className={`flex items-center gap-1 text-xs font-bold ${produto.margem_real_calculada >= 40 ? 'text-primary' : 'text-error'}`}>
-                    {produto.margem_real_calculada >= 40 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-                    <span>{produto.margem_real_calculada.toFixed(1)}% margem</span>
-                  </div>
-                  <div className="flex items-center gap-1 text-[10px] font-bold text-primary">
-                    <BookOpen size={12} /> Ver Detalhes
-                  </div>
-                </div>
+              <select
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                className="bg-white border-none rounded-lg text-xs font-bold text-on-surface-variant px-3 py-2 shadow-sm focus:ring-2 focus:ring-primary/20 appearance-none cursor-pointer"
+                style={{ backgroundImage: 'none' }}
+              >
+                <option value="all">Todas as Categorias</option>
+                {categorias.map(cat => (
+                  <option key={cat.id} value={cat.id}>{cat.nome}</option>
+                ))}
+              </select>
+
+              <div className="h-6 w-px bg-surface-container-high"></div>
+              
+              <button
+                onClick={() => setShowCriticalOnly(!showCriticalOnly)}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-all shrink-0 ${showCriticalOnly ? 'bg-error text-white shadow-sm' : 'text-on-surface-variant hover:bg-surface-container-high'}`}
+              >
+                <AlertTriangle size={14} className={showCriticalOnly ? '' : 'text-error'} />
+                <span className="hidden sm:inline">⚠️ Necessita Correção</span>
+                <span className="sm:hidden">Correção</span>
+              </button>
+
+              <div className="h-6 w-px bg-surface-container-high"></div>
+
+              <div className="flex bg-surface-container-high p-1 rounded-xl border border-surface-container-highest">
+                <button
+                  onClick={() => setViewStatus('ativos')}
+                  className={`px-4 py-1.5 rounded-lg text-[11px] font-black transition-all ${viewStatus === 'ativos' ? 'bg-primary text-white shadow-sm' : 'text-on-surface-variant hover:text-primary'}`}
+                >
+                  ATIVOS
+                </button>
+                <button
+                  onClick={() => setViewStatus('arquivados')}
+                  className={`px-4 py-1.5 rounded-lg text-[11px] font-black transition-all ${viewStatus === 'arquivados' ? 'bg-surface-container-highest text-white shadow-sm' : 'text-on-surface-variant hover:text-primary'}`}
+                >
+                  ARQUIVADOS
+                </button>
               </div>
             </div>
-          ))}
-        </div>
-      ) : (
-        <div className="bg-surface-container-lowest rounded-2xl border border-surface-container-high shadow-m overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-surface-container-low/50 border-b border-surface-container-high">
-                  <th className="px-6 py-5 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Produto</th>
-                  <th className="px-6 py-5 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Categoria</th>
-                  <th className="px-6 py-5 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Preço Venda</th>
-                  <th className="px-6 py-5 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Custo Total</th>
-                  <th className="px-6 py-5 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest text-center">Margem (%)</th>
-                  <th className="px-6 py-5 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest text-center">Lucro (R$)</th>
-                  <th className="px-6 py-5 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Tempo</th>
-                  <th className="px-6 py-5 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest text-right">Ações</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-surface-container-high">
-                {filteredProdutos.map(produto => {
-                  const profit = produto.preco_venda_final - (produto.custo_total || 0);
-                  return (
-                    <tr 
-                      key={produto.id} 
-                      onClick={() => handleProductClick(produto)}
-                      className={`hover:bg-surface-container-low/30 transition-colors group cursor-pointer ${validateProductIntegrity(produto).length > 0 ? 'bg-error/5' : ''}`}
-                    >
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-4">
-                          <div className="w-10 h-10 rounded-lg overflow-hidden bg-surface-container-low flex-shrink-0 relative">
-                            <img 
-                              src={produto.imagem_url || DEFAULT_PRODUCT_IMAGE} 
-                              alt={produto.nome}
-                              className="w-full h-full object-cover"
-                              referrerPolicy="no-referrer"
-                            />
-                            {validateProductIntegrity(produto).length > 0 && (
-                              <div className="absolute inset-0 bg-error/20 flex items-center justify-center">
-                                <AlertTriangle size={16} className="text-error" />
-                              </div>
-                            )}
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <p className="font-bold text-on-surface text-sm sm:text-base">{produto.nome}</p>
-                              {validateProductIntegrity(produto).length > 0 && (
-                                <AlertTriangle size={14} className="text-error" title={validateProductIntegrity(produto).join('\n')} />
-                              )}
-                            </div>
-                            <p className="text-[10px] text-on-surface-variant italic">Rend: {produto.rendimento_unidades} un</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className="px-2.5 py-1 bg-surface-container-low rounded-lg text-[10px] font-bold text-primary border border-primary/10">
-                          {getCategoryName(produto.categoria_id)}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 font-bold text-primary text-sm whitespace-nowrap">
-                        {formatCurrency(produto.preco_venda_final)}
-                      </td>
-                      <td className="px-6 py-4 font-medium text-on-surface-variant text-sm whitespace-nowrap">
-                        {formatCurrency(produto.custo_total || 0)}
-                      </td>
-                      <td className="px-6 py-4 text-center">
-                        <div className={`inline-flex items-center gap-1 text-xs font-bold ${produto.margem_real_calculada >= 40 ? 'text-primary' : 'text-error'}`}>
-                          {produto.margem_real_calculada >= 40 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-                          <span>{produto.margem_real_calculada.toFixed(1)}%</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-center">
-                        <span className={`text-sm font-bold ${profit > 0 ? 'text-primary' : 'text-error'}`}>
-                          {formatCurrency(profit)}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2 text-[11px] text-on-surface-variant">
-                          <Clock size={14} />
-                          <span>{produto.tempo_producao_valor ? `${produto.tempo_producao_valor}${produto.tempo_producao_unidade === 'horas' ? 'h' : 'm'}` : '--'}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button 
-                            onClick={(e) => handleDuplicateProduct(e, produto)}
-                            className="p-2 text-on-surface-variant hover:text-primary hover:bg-primary/10 rounded-lg transition-all"
-                            title="Duplicar"
-                          >
-                            <Copy size={16} />
-                          </button>
-                          <button 
-                            onClick={(e) => handleEditProduct(e, produto)}
-                            className="p-2 text-on-surface-variant hover:text-primary hover:bg-primary/10 rounded-lg transition-all"
-                            title="Editar"
-                          >
-                            <Edit2 size={16} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
           </div>
-        </div>
-      )}
 
-      {filteredProdutos.length === 0 && !loading && (
-        <div className="text-center py-20 bg-surface-container-low rounded-3xl border-2 border-dashed border-surface-container-high animate-in fade-in duration-500">
-          <Package size={48} className="mx-auto text-on-surface-variant/30 mb-4" />
-          <h3 className="text-lg font-bold text-on-surface mb-1">Nenhum produto encontrado</h3>
-          <p className="text-on-surface-variant text-sm max-w-xs mx-auto">
-            {selectedCategory !== 'all' 
-              ? "Não existem itens cadastrados nesta categoria com os filtros atuais." 
-              : "Tente ajustar sua busca ou filtros para encontrar o que procura."}
-          </p>
-          {(searchTerm || selectedCategory !== 'all' || showCriticalOnly) && (
-            <button 
-              onClick={() => {
-                setSearchTerm('');
-                setSelectedCategory('all');
-                setShowCriticalOnly(false);
-              }}
-              className="mt-6 text-primary font-bold text-sm hover:underline"
-            >
-              Limpar todos os filtros
-            </button>
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-20 gap-4">
+              <Loader2 size={40} className="text-primary animate-spin opacity-40" />
+              <p className="text-sm text-on-surface-variant font-medium">Carregando seu catálogo...</p>
+            </div>
+          ) : viewMode === 'grid' ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {filteredProdutos.map(produto => (
+                <div 
+                  key={produto.id} 
+                  onClick={() => handleProductClick(produto)}
+                  className={`bg-white rounded-2xl shadow-sm border border-surface-container-high hover:shadow-md transition-all group cursor-pointer overflow-hidden flex flex-col ${produto.ativo === false ? 'opacity-50 grayscale-[0.5]' : ''}`}
+                >
+                  <div className="aspect-video bg-surface-container-low relative overflow-hidden">
+                    <img 
+                      src={produto.imagem_url || DEFAULT_PRODUCT_IMAGE} 
+                      alt={produto.nome} 
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                      referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = DEFAULT_PRODUCT_IMAGE;
+                      }}
+                    />
+                    
+                    {validateProductIntegrity(produto).length > 0 && (
+                      <div 
+                        className="absolute top-3 left-3 p-1.5 bg-white/90 backdrop-blur-sm rounded-full text-error border border-error/20 shadow-sm animate-pulse"
+                        title={`Erros:\n${validateProductIntegrity(produto).join('\n')}`}
+                      >
+                        <AlertTriangle size={16} />
+                      </div>
+                    )}
+
+                    {produto.ativo === false && (
+                      <div className="absolute top-3 left-3 px-2 py-1 bg-surface-container-highest/80 backdrop-blur-sm rounded-lg text-[10px] font-black text-white uppercase border border-white/20">
+                        Arquivado
+                      </div>
+                    )}
+
+                    <div className="absolute top-3 right-3 flex flex-col gap-2 scale-0 group-hover:scale-100 transition-transform origin-right duration-300">
+                      <div className="px-2 py-1 bg-white/90 backdrop-blur-sm rounded-lg text-[10px] font-bold text-primary border border-primary/20 text-center shadow-sm">
+                        {getCategoryName(produto.categoria_id)}
+                      </div>
+                      <button 
+                        onClick={(e) => handleArchiveProduct(e, produto)}
+                        className={`p-2 rounded-lg shadow-lg transition-all flex items-center justify-center border border-white/20 ${produto.ativo === false ? 'bg-amber-500 text-white' : 'bg-white text-on-surface-variant hover:text-primary'}`}
+                        title={produto.ativo === false ? 'Restaurar Produto' : 'Arquivar Produto'}
+                      >
+                        {produto.ativo === false ? <ArchiveRestore size={14} /> : <Archive size={14} />}
+                      </button>
+                      <button 
+                        onClick={(e) => handleDuplicateProduct(e, produto)}
+                        className="p-2 bg-primary text-white rounded-lg shadow-lg hover:bg-primary/90 transition-all flex items-center justify-center border border-white/20"
+                        title="Duplicar Produto"
+                      >
+                        <Copy size={14} />
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div className="p-5 flex-grow flex flex-col">
+                    <h3 className="text-lg font-bold headline text-on-surface mb-1 truncate">{produto.nome}</h3>
+                    <div className="flex items-center gap-2 text-[10px] text-on-surface-variant mb-4">
+                      <Clock size={12} />
+                      <span>{produto.tempo_producao_valor ? `${produto.tempo_producao_valor} ${produto.tempo_producao_unidade === 'horas' ? 'h' : 'min'}` : '--'}</span>
+                      <span className="mx-1">•</span>
+                      <span>{produto.rendimento_unidades} un</span>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4 pt-4 border-t border-surface-container-high">
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Custo Unit.</span>
+                        <span className="text-sm font-bold text-on-surface">
+                          {formatCurrency(produto.custo_unitario || 0)}
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[10px] uppercase font-bold text-on-surface-variant block">Preço Venda</span>
+                        <span className="text-lg font-bold text-primary">{formatCurrency(produto.preco_venda_final)}</span>
+                      </div>
+                    </div>
+                    
+                    <div className="mt-4 flex items-center justify-between">
+                      <div className={`flex items-center gap-1 text-xs font-bold ${produto.margem_real_calculada >= 40 ? 'text-primary' : 'text-error'}`}>
+                        {produto.margem_real_calculada >= 40 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+                        <span>{produto.margem_real_calculada.toFixed(1)}% margem</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-[10px] font-bold text-primary">
+                        <BookOpen size={12} /> Ver Detalhes
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="bg-surface-container-lowest rounded-2xl border border-surface-container-high shadow-m overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-surface-container-low/50 border-b border-surface-container-high">
+                      <th className="px-6 py-5 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Produto</th>
+                      <th className="px-6 py-5 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Categoria</th>
+                      <th className="px-6 py-5 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Preço Venda</th>
+                      <th className="px-6 py-5 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Custo Total</th>
+                      <th className="px-6 py-5 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest text-center">Margem (%)</th>
+                      <th className="px-6 py-5 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest text-center">Lucro (R$)</th>
+                      <th className="px-6 py-5 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Tempo</th>
+                      <th className="px-6 py-5 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-surface-container-high">
+                    {filteredProdutos.map(produto => {
+                      const profit = produto.preco_venda_final - (produto.custo_total || 0);
+                      return (
+                        <tr 
+                          key={produto.id} 
+                          onClick={() => handleProductClick(produto)}
+                          className={`hover:bg-surface-container-low/30 transition-colors group cursor-pointer ${validateProductIntegrity(produto).length > 0 ? 'bg-error/5' : ''} ${produto.ativo === false ? 'opacity-50' : ''}`}
+                        >
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-4">
+                              <div className="w-10 h-10 rounded-lg overflow-hidden bg-surface-container-low flex-shrink-0 relative">
+                                <img 
+                                  src={produto.imagem_url || DEFAULT_PRODUCT_IMAGE} 
+                                  alt={produto.nome}
+                                  className="w-full h-full object-cover"
+                                  referrerPolicy="no-referrer"
+                                />
+                                {validateProductIntegrity(produto).length > 0 && (
+                                  <div className="absolute inset-0 bg-error/20 flex items-center justify-center">
+                                    <AlertTriangle size={16} className="text-error" />
+                                  </div>
+                                )}
+                                {produto.ativo === false && (
+                                  <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                                    <Archive size={16} className="text-white" />
+                                  </div>
+                                )}
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <p className="font-bold text-on-surface text-sm sm:text-base">
+                                    {produto.nome}
+                                    {produto.ativo === false && <span className="ml-2 text-[8px] bg-surface-container-highest px-1.5 py-0.5 rounded text-white uppercase tracking-tighter">Arquivado</span>}
+                                  </p>
+                                  {validateProductIntegrity(produto).length > 0 && (
+                                    <AlertTriangle size={14} className="text-error" title={validateProductIntegrity(produto).join('\n')} />
+                                  )}
+                                </div>
+                                <p className="text-[10px] text-on-surface-variant italic">Rend: {produto.rendimento_unidades} un</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className="px-2.5 py-1 bg-surface-container-low rounded-lg text-[10px] font-bold text-primary border border-primary/10">
+                              {getCategoryName(produto.categoria_id)}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 font-bold text-primary text-sm whitespace-nowrap">
+                            {formatCurrency(produto.preco_venda_final)}
+                          </td>
+                          <td className="px-6 py-4 font-medium text-on-surface-variant text-sm whitespace-nowrap">
+                            {formatCurrency(produto.custo_total || 0)}
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <div className={`inline-flex items-center gap-1 text-xs font-bold ${produto.margem_real_calculada >= 40 ? 'text-primary' : 'text-error'}`}>
+                              {produto.margem_real_calculada >= 40 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+                              <span>{produto.margem_real_calculada.toFixed(1)}%</span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <span className={`text-sm font-bold ${profit > 0 ? 'text-primary' : 'text-error'}`}>
+                              {formatCurrency(profit)}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-2 text-[11px] text-on-surface-variant">
+                              <Clock size={14} />
+                              <span>{produto.tempo_producao_valor ? `${produto.tempo_producao_valor}${produto.tempo_producao_unidade === 'horas' ? 'h' : 'm'}` : '--'}</span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button 
+                                onClick={(e) => handleArchiveProduct(e, produto)}
+                                className={`p-2 rounded-lg transition-all ${produto.ativo === false ? 'text-amber-600 bg-amber-50' : 'text-on-surface-variant hover:text-primary hover:bg-primary/10'}`}
+                                title={produto.ativo === false ? 'Restaurar' : 'Arquivar'}
+                              >
+                                {produto.ativo === false ? <ArchiveRestore size={16} /> : <Archive size={16} />}
+                              </button>
+                              <button 
+                                onClick={(e) => handleDuplicateProduct(e, produto)}
+                                className="p-2 text-on-surface-variant hover:text-primary hover:bg-primary/10 rounded-lg transition-all"
+                                title="Duplicar"
+                              >
+                                <Copy size={16} />
+                              </button>
+                              <button 
+                                onClick={(e) => handleEditProduct(e, produto)}
+                                className="p-2 text-on-surface-variant hover:text-primary hover:bg-primary/10 rounded-lg transition-all"
+                                title="Editar"
+                              >
+                                <Edit2 size={16} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           )}
-        </div>
+
+          {filteredProdutos.length === 0 && !loading && (
+            <div className="text-center py-20 bg-surface-container-low rounded-3xl border-2 border-dashed border-surface-container-high animate-in fade-in duration-500">
+              <Package size={48} className="mx-auto text-on-surface-variant/30 mb-4" />
+              <h3 className="text-lg font-bold text-on-surface mb-1">Nenhum produto encontrado</h3>
+              <p className="text-on-surface-variant text-sm max-w-xs mx-auto">
+                {selectedCategory !== 'all' 
+                  ? "Não existem itens cadastrados nesta categoria com os filtros atuais." 
+                  : "Tente ajustar sua busca ou filtros para encontrar o que procura."}
+              </p>
+              {(searchTerm || selectedCategory !== 'all' || showCriticalOnly) && (
+                <button 
+                  onClick={() => {
+                    setSearchTerm('');
+                    setSelectedCategory('all');
+                    setShowCriticalOnly(false);
+                  }}
+                  className="mt-6 text-primary font-bold text-sm hover:underline"
+                >
+                  Limpar todos os filtros
+                </button>
+              )}
+            </div>
+          )}
+        </>
       )}
 
       {showModal && (
@@ -580,8 +617,8 @@ export const Produtos = () => {
             setShowModal(false);
             await fetchData();
             
-            // If we are in detail view, refresh the selected product
-            if (showDetail && selectedProduct?.id) {
+            // Explicitly fetch the updated product to ensure UI is in sync
+            if (selectedProduct?.id) {
               try {
                 const data = await dataService.getProdutoById(selectedProduct.id);
                 setSelectedProduct(data);
@@ -593,7 +630,6 @@ export const Produtos = () => {
         />
       )}
 
-      {/* global ConfirmDialog for products */}
       <ConfirmDialog 
         isOpen={showDeleteConfirm}
         title="Excluir Produto?"
@@ -855,7 +891,7 @@ const ProductDetail = ({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
                   {product.modo_preparo ? (
                     <div className="prose prose-sm max-w-none text-on-surface-variant">
-                      {product.modo_preparo.split('\n').map((step, i) => (
+                      {(product.modo_preparo || '').split('\n').map((step, i) => (
                         <div key={i} className="flex gap-6 mb-8 group">
                           <div className="flex-shrink-0 w-10 h-10 rounded-full bg-primary-container/20 text-primary flex items-center justify-center font-bold text-lg group-hover:bg-primary group-hover:text-white transition-all">
                             {i + 1}

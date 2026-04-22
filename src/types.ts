@@ -6,6 +6,7 @@ export interface Categoria {
   nome: string;
   margem_padrao: number;
   tipo_margem: TipoMargem;
+  ativo: boolean;
 }
 
 export interface Ingrediente {
@@ -49,6 +50,7 @@ export interface Produto {
   imposto_percentual?: number;
   imagem_url?: string;
   modo_preparo?: string;
+  ativo: boolean;
   ingredientes?: ProdutoIngrediente[];
   categoria?: Categoria;
   // Keep old names for compatibility if needed, but user said "assume it has these fields"
@@ -98,6 +100,7 @@ export interface Pedido {
   valor_total: number;
   status: 'Em preparação' | 'Pronto' | 'Em entrega' | 'Concluído' | 'Cancelado';
   prioridade?: 'Urgente' | 'Padrão' | 'Baixa';
+  data_entrega: string;
   tempo_estimado?: string;
   observacoes?: string;
   cliente?: Cliente;

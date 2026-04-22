@@ -19,7 +19,9 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { Pedido } from '../../types';
 import { formatCurrency } from '../../services/bakeryService';
-import { Clock, User, Package, AlertCircle } from 'lucide-react';
+import { ptBR } from 'date-fns/locale';
+import { format, parseISO } from 'date-fns';
+import { Calendar as CalendarIcon, Clock, User, Package, AlertCircle } from 'lucide-react';
 
 interface KanbanBoardProps {
   pedidos: Pedido[];
@@ -177,12 +179,10 @@ const SortableOrderCard: React.FC<{ pedido: Pedido, onClick: () => void }> = ({ 
           <Package size={12} />
           <span>{pedido.itens?.length || 0} itens</span>
         </div>
-        {pedido.tempo_estimado && (
-          <div className="flex items-center gap-1.5 text-[10px] text-on-surface-variant">
-            <Clock size={12} />
-            <span>{pedido.tempo_estimado}</span>
-          </div>
-        )}
+        <div className="flex items-center gap-1.5 text-[10px] text-on-surface-variant font-bold">
+          <CalendarIcon size={12} className="text-primary" />
+          <span>Entrega: {format(parseISO(pedido.data_entrega), 'dd/MM/yy')}</span>
+        </div>
       </div>
 
       <div className="mt-3 flex justify-between items-center">

@@ -30,10 +30,23 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
   const [extraCategories, setExtraCategories] = useState<CategoriaExtra[]>([]);
   
   const [clienteId, setClienteId] = useState(pedido?.cliente_id || '');
-  const [dataPedido, setDataPedido] = useState(pedido?.data_pedido ? new Date(pedido.data_pedido).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
+  const [dataPedido, setDataPedido] = useState(() => {
+    try {
+      return pedido?.data_pedido ? new Date(pedido.data_pedido).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+    } catch {
+      return new Date().toISOString().split('T')[0];
+    }
+  });
   const [status, setStatus] = useState(pedido?.status || 'Em preparação');
   const [prioridade, setPrioridade] = useState(pedido?.prioridade || 'Padrão');
   const [observacoes, setObservacoes] = useState(pedido?.observacoes || '');
+  const [dataEntrega, setDataEntrega] = useState(() => {
+    try {
+      return pedido?.data_entrega ? new Date(pedido.data_entrega).toISOString().split('T')[0] : '';
+    } catch {
+      return '';
+    }
+  });
   const [tempoEstimado, setTempoEstimado] = useState(pedido?.tempo_estimado || '');
 
   const [itens, setItens] = useState<Partial<PedidoItem>[]>(pedido?.itens || []);
@@ -121,6 +134,11 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
       return;
     }
 
+      if (!dataEntrega) {
+        toast.error('Informe a data de entrega');
+        return;
+      }
+
     const loadingToast = toast.loading('Salvando pedido...');
 
     try {
@@ -131,6 +149,7 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
         status,
         prioridade,
         observacoes,
+        data_entrega: new Date(dataEntrega).toISOString(),
         tempo_estimado: tempoEstimado,
         valor_total: valorTotal
       };
@@ -178,7 +197,7 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
   };
 
   const filteredProducts = produtos.filter(p => 
-    p.nome.toLowerCase().includes(productSearch.toLowerCase())
+    p.ativo !== false && p.nome.toLowerCase().includes(productSearch.toLowerCase())
   );
 
   return (
@@ -226,13 +245,13 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
             </div>
             <div className="space-y-1.5">
               <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest flex items-center gap-1.5">
-                <Clock size={12} /> Tempo Estimado
+                <Calendar size={12} /> Data de Entrega *
               </label>
               <input 
-                type="text"
-                placeholder="Ex: 45 min, 2 dias"
-                value={tempoEstimado}
-                onChange={e => setTempoEstimado(e.target.value)}
+                type="date"
+                required
+                value={dataEntrega}
+                onChange={e => setDataEntrega(e.target.value)}
                 className="w-full px-4 py-2.5 bg-surface-container-low border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20"
               />
             </div>

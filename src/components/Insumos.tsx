@@ -14,9 +14,8 @@ const columnHelper = createColumnHelper<Ingrediente>();
 
 export const Insumos = () => {
   const [refreshKey, setRefreshKey] = useState(0);
-  const [showModal, setShowModal] = useState(false);
-  const [selectedIngrediente, setSelectedIngrediente] = useState<Ingrediente | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [isRecalculating, setIsRecalculating] = useState(false);
 
   const refresh = () => setRefreshKey(prev => prev + 1);
 
@@ -60,41 +59,21 @@ export const Insumos = () => {
     }
   };
 
-  const handleAdd = () => {
-    setSelectedIngrediente(null);
-    setShowModal(true);
-  };
-
-  const handleEdit = (ingrediente: Ingrediente) => {
-    setSelectedIngrediente(ingrediente);
-    setShowModal(true);
-  };
-
   const recalculateAll = async () => {
-    const loadingToast = toast.loading('Recalculando custos...');
+    setIsRecalculating(true);
+    const loadingToast = toast.loading('Recalculando toda a base de custos...');
     try {
-      await dataService.recalculateAllProducts();
+      await dataService.recalculateEverything();
       refresh();
       toast.success('Custos recalculados com sucesso!', { id: loadingToast });
     } catch (error) {
       toast.error('Erro ao recalcular', { id: loadingToast });
+    } finally {
+      setIsRecalculating(false);
     }
   };
 
   const ingredientColumns = [
-    {
-      id: 'edit_action',
-      header: '',
-      cell: ({ row }: any) => (
-        <button 
-          onClick={() => handleEdit(row.original)}
-          className="p-1 text-on-surface-variant hover:text-primary transition-colors"
-          title="Editar Insumo"
-        >
-          <Edit2 size={16} />
-        </button>
-      ),
-    },
     columnHelper.accessor('nome', { header: 'Nome', cell: EditableCell }),
     columnHelper.accessor('unidade_embalagem', { 
       header: 'Unid. Emb.', 
@@ -149,17 +128,19 @@ export const Insumos = () => {
         </div>
         <div className="flex gap-3">
           <button 
+            onClick={recalculateAll}
+            disabled={isRecalculating}
+            className="flex items-center gap-2 bg-surface-container-low text-primary px-4 py-3 rounded-xl font-bold border border-primary/20 hover:bg-primary/5 transition-all text-sm disabled:opacity-50"
+            title="Recalcula custos de todos os produtos"
+          >
+            <RefreshCw size={18} className={isRecalculating ? 'animate-spin' : ''} /> Recalcular Tudo
+          </button>
+          <button 
             onClick={handleExportCSV}
             disabled={isExporting}
             className="flex items-center gap-2 bg-white text-on-surface px-4 py-3 rounded-xl font-bold border border-surface-container-high shadow-sm hover:bg-surface-container-low transition-all text-sm disabled:opacity-50"
           >
             <Download size={18} /> Exportar CSV
-          </button>
-          <button 
-            onClick={handleAdd}
-            className="flex items-center gap-2 bg-primary text-white px-6 py-3 rounded-xl font-bold font-headline shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all text-sm"
-          >
-            <Plus size={18} /> Novo Insumo
           </button>
         </div>
       </div>
@@ -173,17 +154,6 @@ export const Insumos = () => {
           refreshKey={refreshKey} 
         />
       </div>
-
-      {showModal && (
-        <IngredienteModal 
-          ingrediente={selectedIngrediente}
-          onClose={() => setShowModal(false)}
-          onSave={() => {
-            setShowModal(false);
-            refresh();
-          }}
-        />
-      )}
     </div>
   );
 };

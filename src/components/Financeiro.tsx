@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { DatabaseGrid, EditableCell } from './DatabaseGrid';
 import { createColumnHelper } from '@tanstack/react-table';
-import { CreditCard, TrendingDown, TrendingUp, DollarSign, Download } from 'lucide-react';
+import { CreditCard, TrendingDown, TrendingUp, DollarSign, Download, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { dataService } from '../services/dataService';
 import { formatCurrency } from '../services/bakeryService';
@@ -14,6 +14,7 @@ export const Financeiro = () => {
   const [totalExpenses, setTotalExpenses] = useState(0);
   const [loading, setLoading] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
+  const [isRecalculating, setIsRecalculating] = useState(false);
 
   const refresh = () => setRefreshKey(prev => prev + 1);
 
@@ -42,6 +43,21 @@ export const Financeiro = () => {
       toast.error('Erro ao exportar CSV');
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  const handleRecalculate = async () => {
+    setIsRecalculating(true);
+    const loadingToast = toast.loading('Sincronizando toda a base financeira...');
+    try {
+      await dataService.recalculateEverything();
+      refresh();
+      toast.success('Base financeira atualizada com sucesso!', { id: loadingToast });
+    } catch (error) {
+      console.error('Erro ao recalcular:', error);
+      toast.error('Erro ao recalcular base', { id: loadingToast });
+    } finally {
+      setIsRecalculating(false);
     }
   };
 
@@ -77,13 +93,23 @@ export const Financeiro = () => {
           </h2>
           <p className="text-sm text-on-surface-variant">Controle suas despesas fixas e saúde financeira</p>
         </div>
-        <button 
-          onClick={handleExportCSV}
-          disabled={isExporting}
-          className="flex items-center gap-2 bg-white text-on-surface px-4 py-3 rounded-xl font-bold border border-surface-container-high shadow-sm hover:bg-surface-container-low transition-all text-sm disabled:opacity-50"
-        >
-          <Download size={18} /> Exportar CSV
-        </button>
+        <div className="flex gap-3">
+          <button 
+            onClick={handleRecalculate}
+            disabled={isRecalculating}
+            className="flex items-center gap-2 bg-surface-container-low text-primary px-4 py-3 rounded-xl font-bold border border-primary/20 hover:bg-primary/5 transition-all text-sm disabled:opacity-50"
+            title="Recalcula todos os custos e sincroniza a base"
+          >
+            <RefreshCw size={18} className={isRecalculating ? 'animate-spin' : ''} /> Recalcular Tudo
+          </button>
+          <button 
+            onClick={handleExportCSV}
+            disabled={isExporting}
+            className="flex items-center gap-2 bg-white text-on-surface px-4 py-3 rounded-xl font-bold border border-surface-container-high shadow-sm hover:bg-surface-container-low transition-all text-sm disabled:opacity-50"
+          >
+            <Download size={18} /> Exportar CSV
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

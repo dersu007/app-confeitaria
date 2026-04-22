@@ -27,7 +27,6 @@ import {
 } from 'recharts';
 import { 
   format, 
-  subDays, 
   startOfMonth, 
   endOfMonth, 
   eachDayOfInterval, 
@@ -35,10 +34,10 @@ import {
   startOfYear, 
   eachMonthOfInterval,
   isSameMonth,
-  startOfWeek,
   endOfWeek,
   eachWeekOfInterval,
-  isWithinInterval
+  isWithinInterval,
+  parseISO
 } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { dataService } from '../services/dataService';
@@ -46,7 +45,7 @@ import { Produto, Pedido, Cliente, DespesaFixa } from '../types';
 import { formatCurrency } from '../services/bakeryService';
 
 const KPICard = ({ title, value, change, icon: Icon, trend }: any) => (
-  <div className="bg-surface-container-lowest p-6 rounded-xl border border-surface-container-high flex flex-col gap-4 shadow-sm">
+  <div id={`kpi-${title.toLowerCase().replace(/\s/g, '-')}`} className="bg-surface-container-lowest p-6 rounded-xl border border-surface-container-high flex flex-col gap-4 shadow-sm">
     <div className="flex justify-between items-start">
       <div className="p-2 bg-primary-container/30 rounded-lg text-primary">
         <Icon size={24} />
@@ -66,10 +65,6 @@ const KPICard = ({ title, value, change, icon: Icon, trend }: any) => (
 
 type PeriodoVisao = 'Diário' | 'Semanal' | 'Mensal';
 
-const parseISO = (dateStr: string) => {
-  return new Date(dateStr);
-};
-
 export const Dashboard = () => {
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
@@ -78,22 +73,27 @@ export const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
   const [periodoVisao, setPeriodoVisao] = useState<PeriodoVisao>('Diário');
+  
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
   useEffect(() => {
     const fetchData = async () => {
+      setLoading(true);
       try {
-        const [prodRes, pedRes, cliRes, despRes] = await Promise.all([
+        const [prodData, pedData, cliData, despData] = await Promise.all([
           dataService.getProdutos(),
           dataService.getPedidos(),
           dataService.getClientes(),
           dataService.getDespesasFixas()
         ]);
-        setProdutos(prodRes);
-        setPedidos(pedRes);
-        setClientes(cliRes);
-        setDespesas(despRes);
+        setProdutos(prodData);
+        setPedidos(pedData);
+        setClientes(cliData);
+        setDespesas(despData);
       } catch (error) {
-        console.error('Error fetching dashboard data:', error);
+        console.error('Erro ao carregar dashboard:', error);
+        toast.error('Erro ao carregar dados do dashboard');
       } finally {
         setLoading(false);
       }
@@ -102,19 +102,15 @@ export const Dashboard = () => {
   }, []);
 
   const stats = useMemo(() => {
-    const now = new Date();
-    const currentMonth = now.getMonth();
-    const currentYear = now.getFullYear();
-
-    const monthlyOrders = pedidos.filter(p => {
-      const d = parseISO(p.data_pedido);
-      return d.getMonth() === currentMonth && d.getFullYear() === currentYear && p.status === 'Concluído';
+    const filteredOrders = pedidos.filter(p => {
+      const d = parseISO(p.data_pedido || (p as any).created_at);
+      return d.getMonth() === selectedMonth && d.getFullYear() === selectedYear && p.status === 'Concluído';
     });
 
-    const faturamentoMensal = monthlyOrders.reduce((acc, p) => acc + (p.valor_total || 0), 0);
+    const faturamentoMensal = filteredOrders.reduce((acc, p) => acc + (p.valor_total || 0), 0);
     
     let monthlyCosts = 0;
-    monthlyOrders.forEach(p => {
+    filteredOrders.forEach(p => {
       p.itens?.forEach(item => {
         monthlyCosts += (item.custo_unitario || 0) * (item.quantidade || 0);
       });
@@ -123,36 +119,38 @@ export const Dashboard = () => {
     const totalDespesasFixas = despesas.reduce((acc, d) => acc + (d.valor_mensal || 0), 0);
     const lucroLiquido = faturamentoMensal - monthlyCosts - totalDespesasFixas;
 
-    const pedidosAtivos = pedidos.filter(p => 
-      ['Pendente', 'Em preparação', 'Pronto', 'Em entrega'].includes(p.status)
+    const pedidosAtivosCount = pedidos.filter(p => 
+      ['Em preparação', 'Pronto', 'Em entrega'].includes(p.status)
     ).length;
 
-    const totalConcluidos = pedidos.filter(p => p.status === 'Concluído').length;
-    const faturamentoTotal = pedidos.filter(p => p.status === 'Concluído').reduce((acc, p) => acc + (p.valor_total || 0), 0);
-    const ticketMedio = totalConcluidos > 0 ? faturamentoTotal / totalConcluidos : 0;
+    const totalConcluidos = filteredOrders.length;
+    const ticketMedio = totalConcluidos > 0 ? faturamentoMensal / totalConcluidos : 0;
 
     return {
       faturamentoMensal,
       lucroLiquido,
-      pedidosAtivos,
+      pedidosAtivos: pedidosAtivosCount,
       ticketMedio,
-      totalPedidos: pedidos.length
+      totalPedidos: filteredOrders.length
     };
-  }, [pedidos, despesas]);
+  }, [pedidos, despesas, selectedMonth, selectedYear]);
 
   const salesEvolution = useMemo(() => {
-    const now = new Date();
-    const completedOrders = pedidos.filter(p => p.status === 'Concluído');
+    const baseDate = new Date(selectedYear, selectedMonth, 1);
+    const filteredOrders = pedidos.filter(p => {
+      const d = parseISO(p.data_pedido || (p as any).created_at);
+      return d.getMonth() === selectedMonth && d.getFullYear() === selectedYear && p.status === 'Concluído';
+    });
 
     if (periodoVisao === 'Diário') {
-      const last14Days = eachDayOfInterval({
-        start: subDays(now, 13),
-        end: now
+      const daysInMonth = eachDayOfInterval({
+        start: startOfMonth(baseDate),
+        end: endOfMonth(baseDate)
       });
 
-      return last14Days.map(day => {
-        const total = completedOrders
-          .filter(p => isSameDay(parseISO(p.data_pedido), day))
+      return daysInMonth.map(day => {
+        const total = filteredOrders
+          .filter(p => isSameDay(parseISO(p.data_pedido || (p as any).created_at), day))
           .reduce((acc, p) => acc + (p.valor_total || 0), 0);
         
         return {
@@ -163,14 +161,14 @@ export const Dashboard = () => {
     }
 
     if (periodoVisao === 'Semanal') {
-      const monthStart = startOfMonth(now);
-      const monthEnd = endOfMonth(now);
+      const monthStart = startOfMonth(baseDate);
+      const monthEnd = endOfMonth(baseDate);
       const weeks = eachWeekOfInterval({ start: monthStart, end: monthEnd }, { weekStartsOn: 0 });
 
       return weeks.map((weekStart, index) => {
         const weekEnd = endOfWeek(weekStart, { weekStartsOn: 0 });
-        const total = completedOrders
-          .filter(p => isWithinInterval(parseISO(p.data_pedido), { start: weekStart, end: weekEnd }))
+        const total = filteredOrders
+          .filter(p => isWithinInterval(parseISO(p.data_pedido || (p as any).created_at), { start: weekStart, end: weekEnd }))
           .reduce((acc, p) => acc + (p.valor_total || 0), 0);
         
         return {
@@ -181,12 +179,13 @@ export const Dashboard = () => {
     }
 
     if (periodoVisao === 'Mensal') {
-      const yearStart = startOfYear(now);
-      const months = eachMonthOfInterval({ start: yearStart, end: now });
+      const yearStart = startOfYear(baseDate);
+      const yearEnd = new Date(selectedYear, 11, 31);
+      const months = eachMonthOfInterval({ start: yearStart, end: yearEnd });
 
       return months.map(month => {
-        const total = completedOrders
-          .filter(p => isSameMonth(parseISO(p.data_pedido), month))
+        const total = pedidos
+          .filter(p => p.status === 'Concluído' && isSameMonth(parseISO(p.data_pedido || (p as any).created_at), month))
           .reduce((acc, p) => acc + (p.valor_total || 0), 0);
         
         return {
@@ -197,14 +196,17 @@ export const Dashboard = () => {
     }
 
     return [];
-  }, [pedidos, periodoVisao]);
+  }, [pedidos, periodoVisao, selectedMonth, selectedYear]);
 
   const categoryDistribution = useMemo(() => {
     const categoryTotals: Record<string, number> = {};
     let totalValue = 0;
 
     pedidos
-      .filter(p => p.status === 'Concluído')
+      .filter(p => {
+        const d = parseISO(p.data_pedido || (p as any).created_at);
+        return d.getMonth() === selectedMonth && d.getFullYear() === selectedYear && p.status === 'Concluído';
+      })
       .forEach(p => {
         p.itens?.forEach(item => {
           const catName = item.produto?.categoria?.nome || 'Sem Categoria';
@@ -218,24 +220,25 @@ export const Dashboard = () => {
       .map(([name, value]) => ({
         name,
         value,
-        percentage: totalValue > 0 ? Math.round((value / totalValue) * 100) : 0
+        percentage: totalValue > 0 ? Math.round((value / totalValue) * 360) / 360 : 0 // percentage will be used for labels, value for chart
       }))
       .sort((a, b) => b.value - a.value);
 
-    if (sortedData.length <= 5) return sortedData;
-
-    const top5 = sortedData.slice(0, 5);
-    const othersValue = sortedData.slice(5).reduce((acc, item) => acc + item.value, 0);
-    const othersPercentage = totalValue > 0 ? Math.round((othersValue / totalValue) * 100) : 0;
-
-    return [...top5, { name: 'Outras', value: othersValue, percentage: othersPercentage }];
-  }, [pedidos]);
+    // Re-calculating actual percentage for UI
+    return sortedData.map(d => ({
+      ...d,
+      percentage: totalValue > 0 ? Math.round((d.value / totalValue) * 100) : 0
+    }));
+  }, [pedidos, selectedMonth, selectedYear]);
 
   const topProducts = useMemo(() => {
     const productSales: Record<string, { nome: string, total: number, qtd: number }> = {};
 
     pedidos
-      .filter(p => p.status === 'Concluído')
+      .filter(p => {
+        const d = parseISO(p.data_pedido || (p as any).created_at);
+        return d.getMonth() === selectedMonth && d.getFullYear() === selectedYear && p.status === 'Concluído';
+      })
       .forEach(p => {
         p.itens?.forEach(item => {
           if (!item.produto_id) return;
@@ -250,13 +253,17 @@ export const Dashboard = () => {
     return Object.values(productSales)
       .sort((a, b) => b.total - a.total)
       .slice(0, 5);
-  }, [pedidos]);
+  }, [pedidos, selectedMonth, selectedYear]);
 
   const recentOrders = useMemo(() => {
     return [...pedidos]
-      .sort((a, b) => new Date(b.data_pedido).getTime() - new Date(a.data_pedido).getTime())
+      .filter(p => {
+        const d = parseISO(p.data_pedido || (p as any).created_at);
+        return d.getMonth() === selectedMonth && d.getFullYear() === selectedYear;
+      })
+      .sort((a, b) => new Date(b.data_pedido || (b as any).created_at).getTime() - new Date(a.data_pedido || (a as any).created_at).getTime())
       .slice(0, 5);
-  }, [pedidos]);
+  }, [pedidos, selectedMonth, selectedYear]);
 
   const COLORS = ['#2b6a57', '#6a4a2b', '#d2b48c', '#efe0cd', '#b0f0d8', '#8a9a5b'];
 
@@ -265,23 +272,20 @@ export const Dashboard = () => {
   const exportDashboardReport = async () => {
     setIsExporting(true);
     try {
-      const now = new Date();
-      const monthName = format(now, 'MMMM', { locale: ptBR });
-      const year = format(now, 'yyyy');
+      const monthLabel = format(new Date(selectedYear, selectedMonth, 1), 'MMMM', { locale: ptBR });
+      const yearLabel = selectedYear.toString();
       const BOM = '\uFEFF';
       const sep = ';';
 
       let csvContent = "";
 
-      // Seção 1: Resumo Financeiro
-      csvContent += "SEÇÃO 1: RESUMO FINANCEIRO\n";
+      csvContent += `SEÇÃO 1: RESUMO FINANCEIRO (${monthLabel}/${yearLabel})\n`;
       csvContent += `KPI${sep}Valor\n`;
       csvContent += `Faturamento Mensal${sep}${stats.faturamentoMensal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}\n`;
       csvContent += `Lucro Líquido${sep}${stats.lucroLiquido.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}\n`;
       csvContent += `Ticket Médio${sep}${stats.ticketMedio.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}\n`;
-      csvContent += `Pedidos Ativos${sep}${stats.pedidosAtivos}\n\n`;
+      csvContent += `Pedidos no Período${sep}${stats.totalPedidos}\n\n`;
 
-      // Seção 2: Performance por Categoria
       csvContent += "SEÇÃO 2: PERFORMANCE POR CATEGORIA\n";
       csvContent += `Categoria${sep}Faturamento${sep}Percentual\n`;
       categoryDistribution.forEach(cat => {
@@ -289,7 +293,6 @@ export const Dashboard = () => {
       });
       csvContent += "\n";
 
-      // Seção 3: Histórico de Vendas
       csvContent += `SEÇÃO 3: HISTÓRICO DE VENDAS (${periodoVisao})\n`;
       csvContent += `Período${sep}Faturamento\n`;
       salesEvolution.forEach(item => {
@@ -299,7 +302,7 @@ export const Dashboard = () => {
       const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      const fileName = `relatorio_gestao_honey_sugar_${monthName.toLowerCase()}_${year}.csv`;
+      const fileName = `relatorio_gestao_honey_sugar_${monthLabel.toLowerCase()}_${yearLabel}.csv`;
       
       link.setAttribute('href', url);
       link.setAttribute('download', fileName);
@@ -317,6 +320,13 @@ export const Dashboard = () => {
     }
   };
 
+  const meses = [
+    'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+  ];
+
+  const anos = Array.from({ length: 5 }, (_, i) => 2024 + i);
+
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
@@ -328,23 +338,49 @@ export const Dashboard = () => {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      {/* Header with Export */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-3xl font-black text-on-surface headline">Dashboard</h1>
-          <p className="text-on-surface-variant text-sm font-medium">Gestão inteligente e análise de resultados</p>
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+        <div className="flex flex-col md:flex-row gap-6 items-start md:items-center w-full md:w-auto">
+          <div>
+            <h1 className="text-3xl font-black text-on-surface headline">Dashboard</h1>
+            <p className="text-on-surface-variant text-sm font-medium">Gestão inteligente e análise de resultados</p>
+          </div>
+          
+          <div className="flex gap-2 bg-surface-container-low p-1.5 rounded-2xl border border-surface-container-high shadow-sm">
+            <select 
+              id="select-month"
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(Number(e.target.value))}
+              className="bg-transparent border-none text-xs font-bold text-on-surface focus:ring-0 cursor-pointer pl-2 pr-8"
+            >
+              {meses.map((mes, index) => (
+                <option key={index} value={index}>{mes}</option>
+              ))}
+            </select>
+            <div className="w-px h-4 bg-surface-container-high self-center"></div>
+            <select 
+              id="select-year"
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(Number(e.target.value))}
+              className="bg-transparent border-none text-xs font-bold text-on-surface focus:ring-0 cursor-pointer pl-2 pr-8"
+            >
+              {anos.map(ano => (
+                <option key={ano} value={ano}>{ano}</option>
+              ))}
+            </select>
+          </div>
         </div>
+
         <button 
+          id="btn-export-report"
           onClick={exportDashboardReport}
           disabled={isExporting}
-          className="flex items-center gap-2 px-6 py-3 bg-primary text-white font-bold rounded-2xl hover:bg-primary/90 transition-all shadow-xl shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex items-center gap-2 px-6 py-3 bg-primary text-white font-bold rounded-2xl hover:bg-primary/90 transition-all shadow-xl shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed w-full md:w-auto justify-center"
         >
           {isExporting ? <Loader2 size={18} className="animate-spin" /> : <FileBarChart size={18} />}
           Baixar Relatório
         </button>
       </div>
 
-      {/* Summary Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <KPICard title="Pedidos Ativos" value={stats.pedidosAtivos} icon={Receipt} />
         <KPICard title="Faturamento Mensal" value={formatCurrency(stats.faturamentoMensal)} icon={Wallet} />
@@ -352,9 +388,8 @@ export const Dashboard = () => {
         <KPICard title="Ticket Médio" value={formatCurrency(stats.ticketMedio)} icon={Users} />
       </div>
 
-      {/* Analytics Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-surface-container-lowest p-8 rounded-xl border border-surface-container-high shadow-sm">
+        <div id="sales-evolution-chart" className="lg:col-span-2 bg-surface-container-lowest p-8 rounded-xl border border-surface-container-high shadow-sm">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 mb-8">
             <div>
               <h2 className="text-xl font-bold headline text-on-surface">Evolução de Vendas</h2>
@@ -413,7 +448,7 @@ export const Dashboard = () => {
           </div>
         </div>
 
-        <div className="bg-surface-container-lowest p-8 rounded-xl border border-surface-container-high shadow-sm flex flex-col">
+        <div id="category-distribution-chart" className="bg-surface-container-lowest p-8 rounded-xl border border-surface-container-high shadow-sm flex flex-col">
           <div className="mb-8">
             <h2 className="text-xl font-bold headline text-on-surface">Distribuição</h2>
             <p className="text-sm text-on-surface-variant">Faturamento por categoria</p>
@@ -467,9 +502,8 @@ export const Dashboard = () => {
         </div>
       </div>
 
-      {/* Top Products & Recent Orders */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="bg-surface-container-lowest rounded-xl border border-surface-container-high overflow-hidden shadow-sm flex flex-col">
+        <div id="top-products-card" className="bg-surface-container-lowest rounded-xl border border-surface-container-high overflow-hidden shadow-sm flex flex-col">
           <div className="p-8 border-b border-surface-container-high bg-surface-container-low/30">
             <h2 className="text-xl font-bold headline text-on-surface flex items-center gap-2">
               <TrendingUp className="text-primary" size={20} />
@@ -503,7 +537,7 @@ export const Dashboard = () => {
           </div>
         </div>
 
-        <div className="lg:col-span-2 bg-surface-container-lowest rounded-xl border border-surface-container-high overflow-hidden shadow-sm">
+        <div id="recent-orders-table" className="lg:col-span-2 bg-surface-container-lowest rounded-xl border border-surface-container-high overflow-hidden shadow-sm">
           <div className="p-8 flex justify-between items-center border-b border-surface-container-high">
             <div>
               <h2 className="text-xl font-bold headline text-on-surface">Últimos Pedidos</h2>
@@ -530,7 +564,7 @@ export const Dashboard = () => {
                     <td className="px-8 py-5">
                       <div className="flex flex-col">
                         <span className="text-sm font-bold text-on-surface">{pedido.cliente?.nome || 'Cliente não identificado'}</span>
-                        <span className="text-[10px] text-on-surface-variant">{format(parseISO(pedido.data_pedido), 'dd/MM/yyyy HH:mm', { locale: ptBR })}</span>
+                        <span className="text-[10px] text-on-surface-variant">{format(parseISO(pedido.data_pedido || (pedido as any).created_at), 'dd/MM/yyyy HH:mm', { locale: ptBR })}</span>
                       </div>
                     </td>
                     <td className="px-8 py-5 border-r border-surface-container-high/50">
@@ -558,9 +592,8 @@ export const Dashboard = () => {
         </div>
       </div>
 
-      {/* Margin Alerts */}
       {lowMarginProducts.length > 0 && (
-        <div className="bg-white rounded-xl border border-error-container/20 overflow-hidden shadow-lg shadow-error/5">
+        <div id="margin-alerts" className="bg-white rounded-xl border border-error-container/20 overflow-hidden shadow-lg shadow-error/5">
           <div className="p-8 border-b border-error-container/10 bg-error-container/5 flex justify-between items-center">
             <div>
               <h2 className="text-xl font-bold headline text-error flex items-center gap-2">

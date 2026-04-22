@@ -36,9 +36,10 @@ interface DatabaseGridProps {
   title: string;
   columns: any[];
   onDataChange?: () => void;
+  showArchived?: boolean;
 }
 
-export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChange, refreshKey }: DatabaseGridProps & { refreshKey?: number }) => {
+export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChange, refreshKey, showArchived = false }: DatabaseGridProps & { refreshKey?: number }) => {
   const { user } = useAuth();
   const [data, setData] = useState<any[]>([]);
   const [globalFilter, setGlobalFilter] = useState('');
@@ -85,7 +86,7 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
       'estoque_minimo', 'estoque_atual'
     ];
 
-    const booleanFields = ['usar_margem_categoria', 'usar_preco_manual'];
+    const booleanFields = ['usar_margem_categoria', 'usar_preco_manual', 'ativo'];
 
     if (numericFields.includes(columnId)) {
       if (typeof value === 'string') {
@@ -184,10 +185,10 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
           'usar_preco_manual', 'preco_venda_manual', 'user_id',
           'custo_embalagem', 'taxa_venda_percentual', 'imposto_percentual',
           'custo_total', 'custo_unitario', 'custo_total_calculado',
-          'imagem_url', 'modo_preparo'
+          'imagem_url', 'modo_preparo', 'ativo'
         ];
       case 'categorias':
-        return ['nome', 'margem_padrao', 'tipo_margem', 'user_id'];
+        return ['nome', 'margem_padrao', 'tipo_margem', 'user_id', 'ativo'];
       case 'despesas_fixas':
         return ['descricao', 'valor_mensal', 'categoria', 'user_id'];
       case 'clientes':
@@ -317,7 +318,7 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
     }
 
     e.preventDefault();
-    const clipboardData = e.clipboardData.getData('text');
+    const clipboardData = e.clipboardData.getData('text') || '';
     const rawRows = clipboardData.split(/\r?\n/);
     
     const rows = rawRows.filter(row => {
@@ -353,6 +354,7 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
       const rowsToInsert = [];
       
       for (const rowText of rows) {
+        if (!rowText) continue;
         const cells = rowText.split('\t');
         if (cells.length < 1 && cells[0].trim() === '') continue;
 
@@ -395,7 +397,7 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
               'tipo_margem'
             ];
 
-            const booleanFields = ['usar_margem_categoria', 'usar_preco_manual'];
+            const booleanFields = ['usar_margem_categoria', 'usar_preco_manual', 'ativo'];
             
             if (booleanFields.includes(key)) {
               const lowerVal = value.toString().toLowerCase();
@@ -470,8 +472,15 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
     }
   };
 
+  const filteredData = useMemo(() => {
+    if (showArchived) {
+      return data.filter(item => item.ativo === false);
+    }
+    return data.filter(item => item.ativo !== false);
+  }, [data, showArchived]);
+
   const tableInstance = useReactTable({
-    data,
+    data: filteredData,
     columns: [
       ...initialColumns,
       {
@@ -526,26 +535,6 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
           >
             <Plus size={16} /> Adicionar
           </button>
-          
-          {(table === 'produtos' || table === 'ingredientes' || table === 'categorias' || table === 'despesas_fixas') ? (
-            <button 
-              onClick={handleRecalculateAll}
-              disabled={isRecalculating}
-              title="Recalcular todos os custos e preços"
-              className="flex items-center gap-2 px-4 py-2 bg-surface-container-high text-on-surface font-bold rounded-lg text-sm hover:bg-surface-container-highest transition-all disabled:opacity-50"
-            >
-              <RefreshCw size={16} className={isRecalculating ? 'animate-spin' : ''} /> 
-              {isRecalculating ? 'Recalculando...' : 'Recalcular Tudo'}
-            </button>
-          ) : (
-            <button 
-              onClick={fetchData}
-              title="Atualizar lista"
-              className="p-2 text-on-surface-variant hover:bg-surface-container-low rounded-lg transition-all"
-            >
-              <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
-            </button>
-          )}
         </div>
       </div>
 
@@ -584,7 +573,7 @@ export const DatabaseGrid = ({ table, title, columns: initialColumns, onDataChan
           </thead>
           <tbody className="divide-y divide-surface-container-high">
             {tableInstance.getRowModel().rows.map(row => (
-              <tr key={row.id} className={`hover:bg-surface-container-low/30 transition-colors group ${savingRows.has((row.original as any).id) ? 'opacity-60 bg-primary/5' : ''}`}>
+              <tr key={row.id} className={`hover:bg-surface-container-low/30 transition-colors group ${savingRows.has((row.original as any).id) ? 'opacity-60 bg-primary/5' : ''} ${(row.original as any).ativo === false ? 'opacity-50 grayscale-[0.5]' : ''}`}>
                 {row.getVisibleCells().map(cell => (
                   <td key={cell.id} className="px-4 py-2 text-sm border-r border-surface-container-high last:border-r-0 h-12 relative whitespace-nowrap overflow-hidden text-ellipsis max-w-[300px]">
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
