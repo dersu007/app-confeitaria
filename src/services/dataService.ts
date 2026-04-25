@@ -191,21 +191,23 @@ class DataService {
   async getIngredientes(): Promise<Ingrediente[]> {
     const { data, error } = await supabase
       .from('ingredientes')
-      .select('*, categoria:categorias(*)')
+      .select('*, categoria:categorias!categoria_id(*)')
       .order('nome');
     if (error) throw error;
     return data || [];
   }
 
   async saveIngrediente(ingrediente: Partial<Ingrediente>): Promise<Ingrediente> {
+    const { categoria: _categoria, ...cleanIngrediente } = ingrediente as Record<string, unknown>;
+    
     let query;
-    if (ingrediente.id) {
-      query = supabase.from('ingredientes').update(ingrediente).eq('id', ingrediente.id);
+    if (cleanIngrediente.id) {
+      query = supabase.from('ingredientes').update(cleanIngrediente).eq('id', cleanIngrediente.id);
     } else {
-      query = supabase.from('ingredientes').insert(ingrediente);
+      query = supabase.from('ingredientes').insert(cleanIngrediente);
     }
 
-    const { data, error } = await query.select().single();
+    const { data, error } = await query.select('*, categoria:categorias!categoria_id(*)').single();
     if (error) throw error;
     return data;
   }
@@ -219,7 +221,7 @@ class DataService {
   async getProdutos(): Promise<Produto[]> {
     const { data, error } = await supabase
       .from('produtos')
-      .select('*, categoria:categorias!categoria_id(*), ingredientes:produto_ingredientes(*)')
+      .select('*, categoria:categorias!categoria_id(*), ingredientes:produto_ingredientes(*, ingrediente:ingredientes!ingrediente_id(*))')
       .order('nome');
     if (error) throw error;
     return data || [];
@@ -397,16 +399,152 @@ class DataService {
   }
 
   async savePedido(pedido: Partial<Pedido>): Promise<Pedido> {
-    let query;
-    if (pedido.id) {
-      query = supabase.from('pedidos').update(pedido).eq('id', pedido.id);
-    } else {
-      query = supabase.from('pedidos').insert(pedido);
-    }
+    const { itens, extras, cliente: _cliente, ...pedidoData } = pedido as Record<string, unknown>;
+    
+    // Sanitize pedidoData to only include actual database columns
+    const sanitizedPedido: Record<string, unknown> = {};
+    const allowedFields = [
+      'id', 
+      'cliente_id', 
+      'data_pedido', 
+      'valor_total', 
+      'status', 
+      'prioridade', 
+      'data_entrega', 
+      'observacoes',
+      'user_id' 
+    ];
+    
+    allowedFields.forEach(field => {
+      if (pedidoData[field] !== undefined && pedidoData[field] !== null) {
+        sanitizedPedido[field] = pedidoData[field];
+      }
+    });
 
-    const { data, error } = await query.select().single();
-    if (error) throw error;
-    return data;
+    let savedPedido: Pedido;
+    
+    try {
+      if (sanitizedPedido.id) {
+        const { data, error } = await supabase
+          .from('pedidos')
+          .update(sanitizedPedido)
+          .eq('id', sanitizedPedido.id)
+          .select()
+          .single();
+        if (error) throw error;
+        savedPedido = data;
+      } else {
+        const { data, error } = await supabase
+          .from('pedidos')
+          .insert(sanitizedPedido)
+          .select()
+          .single();
+        if (error) throw error;
+        savedPedido = data;
+      }
+
+      // Handle items if provided
+      if (itens) {
+        // 1. Remove old items if we're updating
+        if (sanitizedPedido.id) {
+          await this.deletePedidoItens(sanitizedPedido.id);
+        }
+        
+        // 2. Insert new items if there are any
+        if (itens.length > 0) {
+          const processedItens = (itens as Record<string, unknown>[]).map(it => ({
+            pedido_id: savedPedido.id,
+            produto_id: it.produto_id as string,
+            quantidade: it.quantidade as number,
+            preco_unitario: it.preco_unitario as number,
+            custo_unitario: it.custo_unitario as number,
+            subtotal: it.subtotal as number
+          }));
+          await this.savePedidoItens(processedItens);
+        }
+      }
+
+      // Handle extras if provided
+      if (extras) {
+        // 1. Remove old extras if we're updating
+        if (sanitizedPedido.id) {
+          await this.deletePedidoExtras(sanitizedPedido.id as string);
+        }
+        
+        // 2. Insert new extras if there are any
+        if (extras.length > 0) {
+          const processedExtras = (extras as Record<string, unknown>[]).map(ex => ({
+            pedido_id: savedPedido.id,
+            descricao: ex.descricao as string,
+            categoria: ex.categoria as string,
+            valor: Number(ex.valor) || 0
+          }));
+          await this.savePedidoExtras(processedExtras);
+        }
+      }
+
+      // 3. Automatic stock reduction for NEW orders
+      if (!sanitizedPedido.id) {
+        await this.processOrderStock(savedPedido.id, savedPedido.user_id);
+      }
+
+      return savedPedido;
+    } catch (err: unknown) {
+      console.error('[Supabase Error] Falha ao salvar pedido completo:', err);
+      throw err;
+    }
+  }
+
+  async processOrderStock(pedidoId: string, userId?: string): Promise<void> {
+    try {
+      // 1. Fetch order items with their products and technical sheets
+      const { data: items, error: itemsError } = await supabase
+        .from('pedidos_itens')
+        .select(`
+          quantidade,
+          produto:produtos(
+            id,
+            user_id,
+            ingredientes:produto_ingredientes(
+              ingrediente_id,
+              quantidade
+            )
+          )
+        `)
+        .eq('pedido_id', pedidoId);
+
+      if (itemsError) throw itemsError;
+      if (!items || items.length === 0) return;
+
+      const movimentacoes: Partial<MovimentacaoEstoque>[] = [];
+
+      // 2. Iterate through products and explode their technical sheet
+      items.forEach((item: Record<string, unknown>) => {
+        const orderQty = item.quantidade as number;
+        const recipeItems = ((item.produto as Record<string, unknown>)?.ingredientes as Record<string, unknown>[]) || [];
+        const productUserId = ((item.produto as Record<string, unknown>)?.user_id as string) || userId;
+
+        recipeItems.forEach((recipe: Record<string, unknown>) => {
+          const reductionQty = orderQty * (recipe.quantidade as number);
+          movimentacoes.push({
+            insumo_id: recipe.ingrediente_id as string,
+            quantidade: reductionQty,
+            tipo: 'saida',
+            origem: 'venda_produto',
+            pedido_id: pedidoId,
+            user_id: productUserId
+          });
+        });
+      });
+
+      // 3. Save all stock reductions
+      if (movimentacoes.length > 0) {
+        await supabase.from('movimentacoes_estoque').insert(movimentacoes);
+      }
+    } catch (err) {
+      console.error('[Stock Error] Falha ao processar baixa automática:', err);
+      // We don't throw here to avoid blocking the order flow as requested
+    }
   }
 
   // --- Despesas Fixas ---
@@ -555,7 +693,7 @@ class DataService {
   async getMovimentacoesEstoque(insumoId?: string): Promise<MovimentacaoEstoque[]> {
     let query = supabase
       .from('movimentacoes_estoque')
-      .select('*, insumo:ingredientes(*)')
+      .select('*, insumo:ingredientes!insumo_id(*)')
       .order('created_at', { ascending: false });
 
     if (insumoId) {
@@ -571,7 +709,7 @@ class DataService {
     const { data, error } = await supabase
       .from('movimentacoes_estoque')
       .insert(movimentacao)
-      .select('*, insumo:ingredientes(*)')
+      .select('*, insumo:ingredientes!insumo_id(*)')
       .single();
 
     if (error) throw error;

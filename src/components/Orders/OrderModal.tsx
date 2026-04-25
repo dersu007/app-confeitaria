@@ -115,10 +115,37 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
       return;
     }
 
-      if (!dataEntrega) {
-        toast.error('Informe a data de entrega');
-        return;
+    if (!dataEntrega) {
+      toast.error('Informe a data de entrega');
+      return;
+    }
+
+    // 2. Stock Warning (Non-blocking)
+    const lowStockIngredients: string[] = [];
+    itens.forEach(item => {
+      const product = item.produto;
+      const quantity = Number(item.quantidade) || 0;
+      
+      if (product?.ingredientes) {
+        product.ingredientes.forEach(recipeItem => {
+          const ingredient = recipeItem.ingrediente;
+          if (ingredient) {
+            const totalNeeded = quantity * recipeItem.quantidade;
+            if (ingredient.estoque_atual < totalNeeded) {
+              lowStockIngredients.push(ingredient.nome);
+            }
+          }
+        });
       }
+    });
+
+    if (lowStockIngredients.length > 0) {
+      const uniqueWarnings = Array.from(new Set(lowStockIngredients));
+      toast.error(
+        `Atenção: Insumo(s) com baixo estoque: ${uniqueWarnings.join(', ')}.`, 
+        { duration: 4000, icon: '⚠️' }
+      );
+    }
 
     const orderData = {
       id: pedido?.id,
@@ -131,21 +158,26 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
       valor_total: valorTotal,
       itens: itens.map(item => ({
         produto_id: item.produto_id!,
-        quantidade: item.quantidade!,
-        preco_unitario: item.preco_unitario!,
-        custo_unitario: item.custo_unitario!,
-        subtotal: item.subtotal!
+        quantidade: Number(item.quantidade) || 0,
+        preco_unitario: Number(item.preco_unitario) || 0,
+        custo_unitario: Number(item.custo_unitario) || 0,
+        subtotal: Number(item.subtotal) || 0
       })),
       extras: extras.map(extra => ({
         descricao: extra.descricao!,
         categoria: extra.categoria!,
-        valor: extra.valor!
+        valor: Number(extra.valor) || 0
       }))
     };
 
     saveOrderMutation.mutate(orderData, {
       onSuccess: () => {
         onSave();
+        toast.success(pedido ? 'Pedido atualizado!' : 'Pedido criado com sucesso!');
+      },
+      onError: (err: unknown) => {
+        console.error('Erro ao salvar pedido:', err);
+        toast.error('Erro ao salvar pedido. Verifique o console.');
       }
     });
   };

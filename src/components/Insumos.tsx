@@ -96,11 +96,7 @@ export const Insumos = () => {
     }),
     columnHelper.accessor('estoque_minimo_unidades', { 
       header: 'Estoque Mín.', 
-      cell: (info) => (
-        <span className="text-xs font-medium text-on-surface-variant">
-          {info.getValue() || 0} un
-        </span>
-      )
+      cell: EditableCell
     }),
     columnHelper.accessor('preco_por_unidade_base', { 
       header: 'Custo g/ml', 

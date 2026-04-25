@@ -1,5 +1,6 @@
 import React from 'react';
 import { 
+  useDroppable,
   DndContext, 
   closestCenter, 
   KeyboardSensor, 
@@ -44,18 +45,25 @@ export const KanbanBoard = ({ pedidos, onStatusChange, onOrderClick }: KanbanBoa
     const { active, over } = event;
     if (!over) return;
 
-    const activeId = active.id;
-    const overId = over.id;
+    const activeId = active.id as string;
+    const overId = over.id as string;
 
-    // If dropped over a column
+    // Se o dropsite for uma coluna ou um card dentro de outra coluna
+    let newStatus: Pedido['status'] | undefined;
+
     if (COLUMNS.includes(overId as Pedido['status'])) {
-      onStatusChange(activeId, overId as Pedido['status']);
-    } 
-    // If dropped over another item
-    else {
+      newStatus = overId as Pedido['status'];
+    } else {
       const overPedido = pedidos.find(p => p.id === overId);
-      if (overPedido && overPedido.status !== pedidos.find(p => p.id === activeId)?.status) {
-        onStatusChange(activeId, overPedido.status);
+      if (overPedido) {
+        newStatus = overPedido.status;
+      }
+    }
+
+    if (newStatus) {
+      const activePedido = pedidos.find(p => p.id === activeId);
+      if (activePedido && activePedido.status !== newStatus) {
+        onStatusChange(activeId, newStatus);
       }
     }
   };
@@ -81,7 +89,7 @@ export const KanbanBoard = ({ pedidos, onStatusChange, onOrderClick }: KanbanBoa
 };
 
 const KanbanColumn: React.FC<{ status: Pedido['status'], pedidos: Pedido[], onOrderClick: (p: Pedido) => void }> = ({ status, pedidos, onOrderClick }) => {
-  const { setNodeRef } = useSortable({ id: status || 'unknown' });
+  const { setNodeRef } = useDroppable({ id: status });
 
   const getStatusColor = (s: string) => {
     switch (s) {

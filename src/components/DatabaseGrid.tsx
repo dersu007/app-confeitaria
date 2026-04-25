@@ -65,19 +65,19 @@ export const DatabaseGrid = <TData extends { id: string } & Record<string, unkno
       'margem_padrao', 'valor_mensal', 'custo_embalagem', 
       'taxa_venda_percentual', 'imposto_percentual',
       'custo_hora_trabalho', 'custo_fixo_rateado', 'custo_total', 'custo_unitario',
-      'estoque_minimo', 'estoque_atual'
+      'estoque_minimo', 'estoque_atual', 'estoque_minimo_unidades'
     ];
 
     const booleanFields = ['usar_margem_categoria', 'usar_preco_manual', 'ativo'];
 
     if (numericFields.includes(columnId)) {
       if (typeof value === 'string') {
-        const cleanValue = value.replace(/[^\d,.-]/g, '').replace(',', '.');
+        const cleanValue = value.replace(/[^\D,.-]/g, '').replace(',', '.');
         finalValue = parseFloat(cleanValue);
       } else {
         finalValue = Number(value);
       }
-      if (isNaN(finalValue) || !isFinite(finalValue)) finalValue = 0;
+      if (isNaN(finalValue as number) || !isFinite(finalValue as number)) finalValue = 0;
     } else if (booleanFields.includes(columnId)) {
       finalValue = value === 'true' || value === true;
     }
@@ -88,13 +88,24 @@ export const DatabaseGrid = <TData extends { id: string } & Record<string, unkno
 
     if (table === 'ingredientes') {
       const ing = updatedRow as unknown as Ingrediente;
+      const rowAsMap = updatedRow as unknown as Record<string, unknown>;
+
       if (columnId === 'preco_embalagem' || columnId === 'peso_embalagem' || columnId === 'unidade_embalagem') {
         const preco_base = calculateIngredientUnitPrice(
           ing.preco_embalagem,
           ing.peso_embalagem,
           ing.unidade_embalagem
         );
-        (updatedRow as unknown as Record<string, unknown>).preco_por_unidade_base = preco_base;
+        rowAsMap.preco_por_unidade_base = preco_base;
+        
+        // Recalcular estoque_minimo se peso_embalagem mudou
+        if (columnId === 'peso_embalagem') {
+          rowAsMap.estoque_minimo = (ing.estoque_minimo_unidades || 0) * (ing.peso_embalagem || 0);
+        }
+      }
+
+      if (columnId === 'estoque_minimo_unidades') {
+        rowAsMap.estoque_minimo = (ing.estoque_minimo_unidades || 0) * (ing.peso_embalagem || 0);
       }
     }
 
@@ -105,8 +116,14 @@ export const DatabaseGrid = <TData extends { id: string } & Record<string, unkno
     try {
       const updatePayload: Record<string, unknown> = { id: rowId, [columnId]: finalValue };
       const rowAsMap = updatedRow as unknown as Record<string, unknown>;
-      if (table === 'ingredientes' && rowAsMap.preco_por_unidade_base !== undefined) {
-        updatePayload.preco_por_unidade_base = rowAsMap.preco_por_unidade_base;
+      
+      if (table === 'ingredientes') {
+        if (rowAsMap.preco_por_unidade_base !== undefined) {
+          updatePayload.preco_por_unidade_base = rowAsMap.preco_por_unidade_base;
+        }
+        if (rowAsMap.estoque_minimo !== undefined) {
+          updatePayload.estoque_minimo = rowAsMap.estoque_minimo;
+        }
       }
 
       await saveEntityMutation.mutateAsync(updatePayload);
