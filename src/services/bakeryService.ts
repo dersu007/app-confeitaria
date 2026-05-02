@@ -20,6 +20,59 @@ export const convertToStandardUnit = (value: number, unit: string): number => {
   }
 };
 
+export const convertFromStandardUnit = (value: number, unit: string): number => {
+  const u = unit?.toLowerCase();
+  const v = Number(value) || 0;
+  
+  switch (u) {
+    case 'kg':
+    case 'l':
+      return v / 1000;
+    case 'g':
+    case 'ml':
+    case 'un':
+    default:
+      return v;
+  }
+};
+
+export function getBaseUnitFromPackagingUnit(unit: string): 'g' | 'ml' | 'un' {
+  const u = unit?.toLowerCase();
+  if (u === 'kg' || u === 'g') return 'g';
+  if (u === 'l' || u === 'ml') return 'ml';
+  return 'un';
+}
+
+export function formatStockValue(value: number, unit: string): string {
+  if (value === undefined || value === null) return '0';
+  
+  const u = unit?.toLowerCase() || 'un';
+  const v = Number(value) || 0;
+
+  // Se a unidade for kg ou l, mostramos sempre nela para consistência solicitada
+  if (u === 'kg') {
+    return `${(v / 1000).toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} kg`;
+  }
+  if (u === 'l') {
+    return `${(v / 1000).toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} L`;
+  }
+  
+  // Se for g ou ml, mas o valor for alto, mostramos em kg/l
+  const baseUnit = getBaseUnitFromPackagingUnit(unit);
+  
+  if (baseUnit === 'g') {
+    if (v >= 1000) return `${(v / 1000).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`;
+    return `${v.toLocaleString('pt-BR', { maximumFractionDigits: 0 })} g`;
+  }
+  
+  if (baseUnit === 'ml') {
+    if (v >= 1000) return `${(v / 1000).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L`;
+    return `${v.toLocaleString('pt-BR', { maximumFractionDigits: 0 })} ml`;
+  }
+  
+  return `${v.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} un`;
+}
+
 export const calculateIngredientUnitPrice = (precoEmbalagem: number, pesoEmbalagem: number, unidade: string): number => {
   const pEmbalagem = Number(precoEmbalagem) || 0;
   const pPeso = Number(pesoEmbalagem) || 0;

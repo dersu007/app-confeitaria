@@ -6,6 +6,11 @@ import { X, Save, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { dataService } from '../../services/dataService';
 import { Ingrediente } from '../../types';
+import { 
+  getBaseUnitFromPackagingUnit,
+  convertToStandardUnit,
+  convertFromStandardUnit
+} from '../../services/bakeryService';
 
 // Função auxiliar para o Zod entender quando o usuário apaga o número (deixa string vazia)
 const numberParser = (minVal: number, errorMsg: string) => 
@@ -52,7 +57,7 @@ export const IngredienteModal = ({ ingrediente, onClose, onSave }: IngredienteMo
       peso_embalagem: ingrediente?.peso_embalagem ?? ('' as unknown as number),
       preco_embalagem: ingrediente?.preco_embalagem ?? ('' as unknown as number),
       estoque_minimo_unidades: ingrediente?.estoque_minimo_unidades ?? ('' as unknown as number),
-      estoque_atual: ingrediente?.estoque_atual ?? ('' as unknown as number),
+      estoque_atual: ingrediente ? convertFromStandardUnit(ingrediente.estoque_atual, ingrediente.unidade_embalagem) : ('' as unknown as number),
       fornecedor: ingrediente?.fornecedor || '',
       descricao: ingrediente?.descricao || '',
       categoria_id: ingrediente?.categoria_id || ''
@@ -76,9 +81,9 @@ export const IngredienteModal = ({ ingrediente, onClose, onSave }: IngredienteMo
     const loadingToast = toast.loading(isEditing ? 'Atualizando insumo...' : 'Cadastrando insumo...');
     
     try {
-      const mappedUnidadeBase = (formData.unidade_embalagem === 'kg' || formData.unidade_embalagem === 'g') ? 'g' : 
-                               (formData.unidade_embalagem === 'l' || formData.unidade_embalagem === 'ml') ? 'ml' : 'un';
+      const mappedUnidadeBase = getBaseUnitFromPackagingUnit(formData.unidade_embalagem);
 
+      const pesoBase = convertToStandardUnit(formData.peso_embalagem, formData.unidade_embalagem);
       const payload: Partial<Ingrediente> = {
         ...ingrediente,
         nome: formData.nome,
@@ -87,8 +92,8 @@ export const IngredienteModal = ({ ingrediente, onClose, onSave }: IngredienteMo
         peso_embalagem: formData.peso_embalagem,
         preco_embalagem: formData.preco_embalagem,
         estoque_minimo_unidades: formData.estoque_minimo_unidades,
-        estoque_minimo: formData.estoque_minimo_unidades * formData.peso_embalagem,
-        estoque_atual: formData.estoque_atual,
+        estoque_minimo: formData.estoque_minimo_unidades * pesoBase,
+        estoque_atual: convertToStandardUnit(formData.estoque_atual, formData.unidade_embalagem),
         fornecedor: formData.fornecedor || null,
         descricao: formData.descricao || null,
         categoria_id: formData.categoria_id || null,

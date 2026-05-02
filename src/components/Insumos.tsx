@@ -5,7 +5,7 @@ import { Database, RefreshCw, AlertTriangle, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { dataService } from '../services/dataService';
 import { useRecalculateEverything } from '../hooks/useQueries';
-import { formatCurrency } from '../services/bakeryService';
+import { formatCurrency, formatStockValue } from '../services/bakeryService';
 import { format } from 'date-fns';
 import { Ingrediente } from '../types';
 import { exportToCSV } from '../utils/csvUtils';
@@ -60,7 +60,7 @@ export const Insumos = () => {
     recalculateEverythingMutation.mutate();
   };
 
-  const ingredientColumns = [
+  const ingredientColumns = React.useMemo(() => [
     columnHelper.accessor('nome', { header: 'Nome', cell: EditableCell }),
     columnHelper.accessor('unidade_embalagem', { 
       header: 'Unid. Emb.', 
@@ -82,12 +82,12 @@ export const Insumos = () => {
     columnHelper.accessor('estoque_atual', { 
       header: 'Saldo Atual', 
       cell: (props) => {
-        const { estoque_atual, estoque_minimo, unidade_base } = props.row.original;
-        const isCritical = estoque_atual <= estoque_minimo;
+        const { estoque_atual, estoque_minimo, unidade_embalagem } = props.row.original;
+        const isCritical = estoque_atual <= (estoque_minimo || 0);
         return (
           <div className="flex items-center gap-2" title="Alterar saldo apenas via aba Estoque">
             <span className={`font-bold ${isCritical ? 'text-error' : 'text-on-surface'}`}>
-              {estoque_atual} {unidade_base}
+              {formatStockValue(estoque_atual || 0, unidade_embalagem)}
             </span>
             {isCritical && <AlertTriangle size={14} className="text-error animate-pulse" />}
           </div>
@@ -95,7 +95,7 @@ export const Insumos = () => {
       }
     }),
     columnHelper.accessor('estoque_minimo_unidades', { 
-      header: 'Estoque Mín.', 
+      header: 'Est. Mín. (Emb.)', 
       cell: EditableCell
     }),
     columnHelper.accessor('preco_por_unidade_base', { 
@@ -103,7 +103,7 @@ export const Insumos = () => {
       cell: info => <span className="font-mono text-[10px] text-primary">{formatCurrency(info.getValue() || 0)}</span> 
     }),
     columnHelper.accessor('fornecedor', { header: 'Fornecedor', cell: EditableCell }),
-  ];
+  ], []);
 
   return (
     <div className="space-y-6">

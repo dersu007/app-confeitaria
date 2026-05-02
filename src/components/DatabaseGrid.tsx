@@ -1,19 +1,21 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   ColumnDef,
   getCoreRowModel,
   flexRender,
   Row,
   Table,
+  useReactTable,
 } from '@tanstack/react-table';
 import { dataService } from '../services/dataService';
 import { useAuth } from '../lib/auth';
 import { useTableData, useSaveEntity, useDeleteEntity, useInsertEntities } from '../hooks/useQueries';
 import { Plus, Trash2, Save, Search, ClipboardPaste } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useReactTable } from '@tanstack/react-table';
 import { 
-  calculateIngredientUnitPrice
+  calculateIngredientUnitPrice,
+  convertToStandardUnit,
+  getBaseUnitFromPackagingUnit
 } from '../services/bakeryService';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { useQueryClient } from '@tanstack/react-query';
@@ -72,7 +74,7 @@ export const DatabaseGrid = <TData extends { id: string } & Record<string, unkno
 
     if (numericFields.includes(columnId)) {
       if (typeof value === 'string') {
-        const cleanValue = value.replace(/[^\D,.-]/g, '').replace(',', '.');
+        const cleanValue = value.replace(/[^0-9,.-]/g, '').replace(',', '.');
         finalValue = parseFloat(cleanValue);
       } else {
         finalValue = Number(value);
@@ -98,14 +100,20 @@ export const DatabaseGrid = <TData extends { id: string } & Record<string, unkno
         );
         rowAsMap.preco_por_unidade_base = preco_base;
         
+        if (columnId === 'unidade_embalagem') {
+          rowAsMap.unidade_base = getBaseUnitFromPackagingUnit(ing.unidade_embalagem);
+        }
+
         // Recalcular estoque_minimo se peso_embalagem mudou
-        if (columnId === 'peso_embalagem') {
-          rowAsMap.estoque_minimo = (ing.estoque_minimo_unidades || 0) * (ing.peso_embalagem || 0);
+        if (columnId === 'peso_embalagem' || columnId === 'unidade_embalagem') {
+          const pesoBase = convertToStandardUnit(ing.peso_embalagem || 0, ing.unidade_embalagem);
+          rowAsMap.estoque_minimo = (ing.estoque_minimo_unidades || 0) * pesoBase;
         }
       }
 
       if (columnId === 'estoque_minimo_unidades') {
-        rowAsMap.estoque_minimo = (ing.estoque_minimo_unidades || 0) * (ing.peso_embalagem || 0);
+        const pesoBase = convertToStandardUnit(ing.peso_embalagem || 0, ing.unidade_embalagem);
+        rowAsMap.estoque_minimo = (ing.estoque_minimo_unidades || 0) * pesoBase;
       }
     }
 
@@ -123,6 +131,9 @@ export const DatabaseGrid = <TData extends { id: string } & Record<string, unkno
         }
         if (rowAsMap.estoque_minimo !== undefined) {
           updatePayload.estoque_minimo = rowAsMap.estoque_minimo;
+        }
+        if (rowAsMap.unidade_base !== undefined) {
+          updatePayload.unidade_base = rowAsMap.unidade_base;
         }
       }
 
@@ -420,23 +431,25 @@ export const DatabaseGrid = <TData extends { id: string } & Record<string, unkno
     return data.filter(item => item.ativo !== false);
   }, [data, showArchived]);
 
+  const columns = useMemo(() => [
+    ...initialColumns,
+    {
+      id: 'actions',
+      header: '',
+      cell: ({ row }: { row: Row<TData> }) => (
+        <button 
+          onClick={() => handleStartDelete(row.original)}
+          className="p-1 text-on-surface-variant hover:text-error transition-colors"
+        >
+          <Trash2 size={16} />
+        </button>
+      ),
+    } as ColumnDef<TData, unknown>
+  ], [initialColumns]);
+
   const tableInstance = useReactTable<TData>({
     data: filteredData,
-    columns: [
-      ...initialColumns,
-      {
-        id: 'actions',
-        header: '',
-        cell: ({ row }: { row: Row<TData> }) => (
-          <button 
-            onClick={() => handleStartDelete(row.original)}
-            className="p-1 text-on-surface-variant hover:text-error transition-colors"
-          >
-            <Trash2 size={16} />
-          </button>
-        ),
-      } as ColumnDef<TData, unknown>
-    ],
+    columns,
     state: {
       globalFilter,
     },
@@ -573,12 +586,10 @@ interface CellProps {
 export const EditableCell = ({ getValue, row, column: { id }, table }: CellProps) => {
   const initialValue = getValue();
   const [value, setValue] = useState(initialValue);
-  const [prevInitialValue, setPrevInitialValue] = useState(initialValue);
 
-  if (initialValue !== prevInitialValue) {
-    setPrevInitialValue(initialValue);
+  useEffect(() => {
     setValue(initialValue);
-  }
+  }, [initialValue]);
 
   const onBlur = () => { 
     if (value !== initialValue) {
@@ -597,12 +608,10 @@ interface SelectCellProps extends CellProps {
 export const SelectCell = ({ getValue, row, column: { id }, table, options }: SelectCellProps) => {
   const initialValue = getValue();
   const [value, setValue] = useState(initialValue);
-  const [prevInitialValue, setPrevInitialValue] = useState(initialValue);
 
-  if (initialValue !== prevInitialValue) {
-    setPrevInitialValue(initialValue);
+  useEffect(() => {
     setValue(initialValue);
-  }
+  }, [initialValue]);
 
   const onChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newValue = e.target.value;
@@ -625,12 +634,9 @@ export const CategoryCell = ({ getValue, row, column: { id }, table }: CellProps
   const [newCategory, setNewCategory] = useState('');
   const queryClient = useQueryClient();
 
-  const [prevInitialValue, setPrevInitialValue] = useState(initialValue);
-
-  if (initialValue !== prevInitialValue) {
-    setPrevInitialValue(initialValue);
+  useEffect(() => {
     setValue(initialValue);
-  }
+  }, [initialValue]);
 
   const onChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value;

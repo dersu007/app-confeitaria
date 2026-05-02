@@ -16,6 +16,7 @@ import {
 import toast from 'react-hot-toast';
 import { formatCurrency, calculateUnitCost } from '../../services/bakeryService';
 import { useClientes, useProdutos, useCategoriasExtras, useSaveOrder } from '../../hooks/useQueries';
+import { useAuth } from '../../lib/auth';
 
 interface OrderModalProps {
   pedido?: Pedido | null;
@@ -24,6 +25,7 @@ interface OrderModalProps {
 }
 
 export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
+  const { user } = useAuth();
   const { data: clientes = [], isLoading: loadingCli } = useClientes();
   const { data: produtos = [], isLoading: loadingProd } = useProdutos();
   const { data: extraCategories = [], isLoading: loadingExtraCat } = useCategoriasExtras();
@@ -149,6 +151,7 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
 
     const orderData = {
       id: pedido?.id,
+      user_id: user?.id,
       cliente_id: clienteId,
       data_pedido: new Date(dataPedido).toISOString(),
       status,
@@ -169,6 +172,11 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
         valor: Number(extra.valor) || 0
       }))
     };
+
+    if (!orderData.user_id && !orderData.id) {
+      toast.error('Usuário não autenticado');
+      return;
+    }
 
     saveOrderMutation.mutate(orderData, {
       onSuccess: () => {

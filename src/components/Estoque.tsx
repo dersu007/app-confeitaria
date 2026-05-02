@@ -24,15 +24,7 @@ import { format, parseISO } from 'date-fns';
 import toast from 'react-hot-toast';
 import { Ingrediente } from '../types';
 import { exportToCSV } from '../utils/csvUtils';
-
-const formatStockValue = (value: number, unit: string) => {
-  if ((unit === 'g' || unit === 'ml') && value >= 1000) {
-    const newValue = value / 1000;
-    const newUnit = unit === 'g' ? 'kg' : 'l';
-    return `${newValue.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${newUnit}`;
-  }
-  return `${value.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${unit}`;
-};
+import { formatStockValue } from '../services/bakeryService';
 
 const EmptyState = ({ message }: { message: string }) => (
   <div className="py-20 text-center animate-in fade-in zoom-in duration-300">
@@ -81,9 +73,10 @@ export const Estoque = () => {
       setShowEntryModal(false);
       setSelectedInsumo(null);
       setQuantity('');
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      toast.error('Erro ao registrar entrada');
+      const errorMessage = error.message || 'Erro ao registrar entrada';
+      toast.error(errorMessage);
     } finally {
       setIsSaving(false);
     }
@@ -94,7 +87,7 @@ export const Estoque = () => {
       const matchesSearch = i.nome.toLowerCase().includes(searchTerm.toLowerCase()) || 
                            (i.fornecedor?.toLowerCase() || '').includes(searchTerm.toLowerCase());
       const matchesCategory = selectedCategory === 'all' || i.categoria_id === selectedCategory;
-      const matchesCritical = !onlyCritical || (i.estoque_atual <= i.estoque_minimo);
+      const matchesCritical = !onlyCritical || ((i.estoque_atual || 0) <= (i.estoque_minimo || 0));
       const matchesActive = activeTab === 'ativos' ? (i.ativo !== false) : (i.ativo === false);
       
       return matchesSearch && matchesCategory && matchesCritical && matchesActive;
@@ -261,7 +254,7 @@ export const Estoque = () => {
                         </td>
                         <td className="px-6 py-4 text-xs font-medium text-on-surface-variant">{insumo.unidade_base}</td>
                         <td className={`px-6 py-4 text-sm text-right ${isCritical ? 'text-error font-black' : 'text-on-surface font-bold'}`}>
-                          {formatStockValue(insumo.estoque_atual || 0, insumo.unidade_base)}
+                          {formatStockValue(insumo.estoque_atual || 0, insumo.unidade_embalagem)}
                         </td>
                         <td className="px-6 py-4 text-xs text-on-surface-variant text-right font-medium">
                           {insumo.estoque_minimo_unidades} un
@@ -340,7 +333,7 @@ export const Estoque = () => {
                         </span>
                       </td>
                       <td className={`px-6 py-4 text-sm font-black text-right ${mov.tipo === 'entrada' ? 'text-success' : 'text-error'}`}>
-                        {mov.tipo === 'entrada' ? '+' : '-'}{formatStockValue(mov.quantidade, mov.insumo?.unidade_base || '')}
+                        {mov.tipo === 'entrada' ? '+' : '-'}{formatStockValue(mov.quantidade, mov.insumo?.unidade_embalagem || '')}
                       </td>
                       <td className="px-6 py-4">
                         <span className="text-[9px] font-bold px-2 py-0.5 bg-surface-container-high rounded text-on-surface-variant uppercase">
@@ -403,12 +396,14 @@ export const Estoque = () => {
                 <div className="p-4 bg-primary/5 rounded-2xl border border-primary/10">
                   <p className="text-[10px] font-black text-primary uppercase tracking-widest mb-1">Insumo Selecionado</p>
                   <p className="text-lg font-bold text-on-surface">{selectedInsumo.nome}</p>
-                  <p className="text-xs text-on-surface-variant font-medium mt-1">Saldo Atual: {selectedInsumo.estoque_atual} {selectedInsumo.unidade_base}</p>
+                  <p className="text-xs text-on-surface-variant font-medium mt-1">Saldo Atual: {formatStockValue(selectedInsumo.estoque_atual || 0, selectedInsumo.unidade_embalagem)}</p>
                 </div>
               )}
 
               <div>
-                <label className="block text-[10px] font-black text-on-surface-variant uppercase tracking-widest mb-2 ml-1">Quantidade de Entrada</label>
+                <label className="block text-[10px] font-black text-on-surface-variant uppercase tracking-widest mb-2 ml-1 text-primary">
+                  Quantidade para Entrada em {selectedInsumo?.unidade_embalagem || 'un'}
+                </label>
                 <div className="relative">
                   <input 
                     type="number"
@@ -421,10 +416,13 @@ export const Estoque = () => {
                   />
                   {selectedInsumo && (
                     <span className="absolute right-6 top-1/2 -translate-y-1/2 font-black text-primary/40 uppercase pointer-events-none">
-                      {selectedInsumo.unidade_base}
+                      {selectedInsumo.unidade_embalagem}
                     </span>
                   )}
                 </div>
+                <p className="mt-2 text-[10px] font-medium text-on-surface-variant italic">
+                  * O sistema converterá automaticamente para {selectedInsumo?.unidade_base} ao salvar.
+                </p>
               </div>
 
               <button 

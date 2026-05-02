@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { dataService } from '../services/dataService';
 import { Produto, Ingrediente, Categoria, Pedido, Cliente, DespesaFixa, CategoriaExtra, MovimentacaoEstoque } from '../types';
+import { validateProductIntegrity } from '../services/bakeryService';
 import toast from 'react-hot-toast';
 
 // --- PRODUTOS ---
@@ -124,8 +125,8 @@ export const useSaveOrder = () => {
 export const useUpdatePedidoStatus = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, status }: { id: string, status: Pedido['status'] }) => 
-      dataService.updatePedidoStatus(id, status),
+    mutationFn: ({ pedidoId, status }: { pedidoId: string, status: Pedido['status'] }) => 
+      dataService.updatePedidoStatus(pedidoId, status),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['pedidos'] });
       queryClient.invalidateQueries({ queryKey: ['clientes'] });
@@ -231,6 +232,35 @@ export const useTableData = (table: string) => {
   return useQuery({
     queryKey: [table],
     queryFn: () => dataService.getTableData(table),
+  });
+};
+
+export const useGlobalNotifications = () => {
+  return useQuery({
+    queryKey: ['global_notifications'],
+    queryFn: async () => {
+      const [ingredients, products, orders] = await Promise.all([
+        dataService.getIngredientes(),
+        dataService.getProdutos(),
+        dataService.getPedidos()
+      ]);
+
+      const criticalStockCount = ingredients.filter(i => (i.estoque_atual || 0) <= (i.estoque_minimo || 0)).length;
+      
+      const integrityIssues = products
+        .map(p => ({ product: p, errors: validateProductIntegrity(p) }))
+        .filter(item => item.errors.length > 0);
+
+      const openOrdersCount = orders.filter(o => o.status !== 'Concluído' && o.status !== 'Cancelado').length;
+
+      return {
+        criticalStockCount,
+        integrityIssues,
+        openOrdersCount
+      };
+    },
+    refetchInterval: 5 * 60 * 1000, // 5 minutes
+    staleTime: 60 * 1000, // 1 minute
   });
 };
 

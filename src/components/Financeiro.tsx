@@ -50,11 +50,11 @@ export const Financeiro = () => {
     recalculateEverythingMutation.mutate();
   };
 
-  const expenseColumns = [
+  const expenseColumns = React.useMemo(() => [
     columnHelper.accessor('descricao', { header: 'Descrição', cell: EditableCell }),
     columnHelper.accessor('valor_mensal', { header: 'Valor Mensal', cell: EditableCell }),
     columnHelper.accessor('categoria', { header: 'Categoria', cell: EditableCell }),
-  ];
+  ], []);
 
   return (
     <div className="space-y-6">

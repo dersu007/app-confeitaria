@@ -1,19 +1,20 @@
 import React from 'react';
 import { 
   useDroppable,
+  useDraggable,
   DndContext, 
   closestCenter, 
   KeyboardSensor, 
   PointerSensor, 
   useSensor, 
   useSensors,
-  DragEndEvent
+  DragEndEvent,
+  DragStartEvent,
+  DragOverlay,
+  defaultDropAnimationSideEffects
 } from '@dnd-kit/core';
 import { 
-  SortableContext, 
   sortableKeyboardCoordinates, 
-  verticalListSortingStrategy,
-  useSortable
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Pedido } from '../../types';
@@ -30,6 +31,8 @@ interface KanbanBoardProps {
 const COLUMNS: Pedido['status'][] = ['Em preparação', 'Pronto', 'Em entrega', 'Concluído', 'Cancelado'];
 
 export const KanbanBoard = ({ pedidos, onStatusChange, onOrderClick }: KanbanBoardProps) => {
+  const [activeId, setActiveId] = React.useState<string | null>(null);
+
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
@@ -41,37 +44,34 @@ export const KanbanBoard = ({ pedidos, onStatusChange, onOrderClick }: KanbanBoa
     })
   );
 
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveId(event.active.id as string);
+  };
+
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
+    setActiveId(null);
+    
     if (!over) return;
 
-    const activeId = active.id as string;
-    const overId = over.id as string;
+    const pedidoId = active.id as string;
+    const newStatus = over.id as Pedido['status'];
 
-    // Se o dropsite for uma coluna ou um card dentro de outra coluna
-    let newStatus: Pedido['status'] | undefined;
-
-    if (COLUMNS.includes(overId as Pedido['status'])) {
-      newStatus = overId as Pedido['status'];
-    } else {
-      const overPedido = pedidos.find(p => p.id === overId);
-      if (overPedido) {
-        newStatus = overPedido.status;
-      }
-    }
-
-    if (newStatus) {
-      const activePedido = pedidos.find(p => p.id === activeId);
-      if (activePedido && activePedido.status !== newStatus) {
-        onStatusChange(activeId, newStatus);
+    if (COLUMNS.includes(newStatus)) {
+      const pedido = pedidos.find(p => p.id === pedidoId);
+      if (pedido && pedido.status !== newStatus) {
+        onStatusChange(pedidoId, newStatus);
       }
     }
   };
+
+  const activePedido = activeId ? pedidos.find(p => p.id === activeId) : null;
 
   return (
     <DndContext 
       sensors={sensors}
       collisionDetection={closestCenter}
+      onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6 h-full min-h-[600px]">
@@ -84,12 +84,28 @@ export const KanbanBoard = ({ pedidos, onStatusChange, onOrderClick }: KanbanBoa
           />
         ))}
       </div>
+
+      <DragOverlay dropAnimation={{
+        sideEffects: defaultDropAnimationSideEffects({
+          styles: {
+            active: {
+              opacity: '0.5',
+            },
+          },
+        }),
+      }}>
+        {activePedido ? (
+          <div className="opacity-80 scale-105 rotate-2 shadow-2xl pointer-events-none">
+            <OrderCard pedido={activePedido} onClick={() => {}} />
+          </div>
+        ) : null}
+      </DragOverlay>
     </DndContext>
   );
 };
 
 const KanbanColumn: React.FC<{ status: Pedido['status'], pedidos: Pedido[], onOrderClick: (p: Pedido) => void }> = ({ status, pedidos, onOrderClick }) => {
-  const { setNodeRef } = useDroppable({ id: status });
+  const { setNodeRef, isOver } = useDroppable({ id: status });
 
   const getStatusColor = (s: string) => {
     switch (s) {
@@ -103,7 +119,12 @@ const KanbanColumn: React.FC<{ status: Pedido['status'], pedidos: Pedido[], onOr
   };
 
   return (
-    <div ref={setNodeRef} className="flex flex-col gap-4 bg-surface-container-low/30 rounded-3xl p-4 border border-surface-container-high min-h-[500px]">
+    <div 
+      ref={setNodeRef} 
+      className={`flex flex-col gap-4 bg-surface-container-low/30 rounded-3xl p-4 border transition-all duration-300 min-h-[500px] ${
+        isOver ? 'border-primary bg-primary/5 shadow-inner scale-[1.02]' : 'border-surface-container-high'
+      }`}
+    >
       <div className="flex items-center justify-between px-2">
         <div className="flex items-center gap-2">
           <div className={`w-2 h-2 rounded-full ${getStatusColor(status)}`} />
@@ -114,43 +135,54 @@ const KanbanColumn: React.FC<{ status: Pedido['status'], pedidos: Pedido[], onOr
         </span>
       </div>
 
-      <SortableContext items={pedidos.map(p => p.id)} strategy={verticalListSortingStrategy}>
-        <div className="flex flex-col gap-3">
-          {pedidos.map(pedido => (
-            <SortableOrderCard 
-              key={pedido.id} 
-              pedido={pedido} 
-              onClick={() => onOrderClick(pedido)} 
-            />
-          ))}
-          {pedidos.length === 0 && (
-            <div className="py-12 text-center border-2 border-dashed border-surface-container-high rounded-2xl">
-              <p className="text-[10px] text-on-surface-variant italic">Arraste aqui</p>
-            </div>
-          )}
-        </div>
-      </SortableContext>
+      <div className="flex flex-col gap-3 flex-grow">
+        {pedidos.map(pedido => (
+          <DraggableOrderCard 
+            key={pedido.id} 
+            pedido={pedido} 
+            onClick={() => onOrderClick(pedido)} 
+          />
+        ))}
+        {pedidos.length === 0 && (
+          <div className={`flex-grow flex items-center justify-center border-2 border-dashed rounded-2xl transition-colors ${
+            isOver ? 'border-primary/50 text-primary' : 'border-surface-container-high text-on-surface-variant'
+          }`}>
+            <p className="text-[10px] italic">Arraste aqui</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
 
-const SortableOrderCard: React.FC<{ pedido: Pedido, onClick: () => void }> = ({ pedido, onClick }) => {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging
-  } = useSortable({ id: pedido.id });
+const DraggableOrderCard: React.FC<{ pedido: Pedido, onClick: () => void }> = ({ pedido, onClick }) => {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: pedido.id,
+  });
 
   const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-    zIndex: isDragging ? 100 : 1,
+    transform: CSS.Translate.toString(transform),
+    opacity: isDragging ? 0 : 1,
   };
 
+  return (
+    <div 
+      ref={setNodeRef} 
+      style={style} 
+      {...attributes} 
+      {...listeners}
+      onClick={() => {
+        // Prevent click if dragging
+        if (transform) return;
+        onClick();
+      }}
+    >
+      <OrderCard pedido={pedido} onClick={onClick} />
+    </div>
+  );
+};
+
+const OrderCard: React.FC<{ pedido: Pedido, onClick: () => void }> = ({ pedido }) => {
   const getPriorityColor = (p?: string) => {
     switch (p) {
       case 'Urgente': return 'bg-error/10 text-error border-error/20';
@@ -160,14 +192,7 @@ const SortableOrderCard: React.FC<{ pedido: Pedido, onClick: () => void }> = ({ 
   };
 
   return (
-    <div 
-      ref={setNodeRef} 
-      style={style} 
-      {...attributes} 
-      {...listeners}
-      onClick={onClick}
-      className="bg-surface-container-lowest p-4 rounded-2xl border border-surface-container-high shadow-sm hover:shadow-md hover:border-primary/30 transition-all cursor-pointer group"
-    >
+    <div className="bg-surface-container-lowest p-4 rounded-2xl border border-surface-container-high shadow-sm hover:shadow-md hover:border-primary/30 transition-all cursor-pointer group select-none">
       <div className="flex justify-between items-start mb-3">
         <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border uppercase tracking-wider ${getPriorityColor(pedido.prioridade)}`}>
           {pedido.prioridade || 'Padrão'}
@@ -186,7 +211,7 @@ const SortableOrderCard: React.FC<{ pedido: Pedido, onClick: () => void }> = ({ 
         </div>
         <div className="flex items-center gap-1.5 text-[10px] text-on-surface-variant font-bold">
           <CalendarIcon size={12} className="text-primary" />
-          <span>Entrega: {format(parseISO(pedido.data_entrega), 'dd/MM/yy')}</span>
+          <span>Entrega: {pedido.data_entrega ? format(parseISO(pedido.data_entrega), 'dd/MM/yy') : '-'}</span>
         </div>
       </div>
 

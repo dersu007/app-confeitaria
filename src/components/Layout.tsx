@@ -21,10 +21,9 @@ import {
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useAuth } from '../lib/auth';
-import { dataService } from '../services/dataService';
-import { validateProductIntegrity } from '../services/bakeryService';
+import { useGlobalNotifications } from '../hooks/useQueries';
 import { useQueryClient } from '@tanstack/react-query';
-import { Produto } from '../types';
+import { dataService } from '../services/dataService';
 import { ErrorBoundary } from 'react-error-boundary';
 import { ErrorFallback } from './ui/ErrorFallback';
 import { logErrorToBackend } from '../utils/errorUtils';
@@ -48,45 +47,16 @@ export const Layout = () => {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [criticalStockCount, setCriticalStockCount] = React.useState(0);
-  const [openOrdersCount, setOpenOrdersCount] = React.useState(0);
-  const [integrityIssues, setIntegrityIssues] = React.useState<{product: Produto, errors: string[]}[]>([]);
+  const { data: notifications } = useGlobalNotifications();
+  
   const [isRecalculating, setIsRecalculating] = React.useState(false);
   const [showNotifications, setShowNotifications] = React.useState(false);
 
-  const fetchNotificationData = React.useCallback(async () => {
-    try {
-      const [ingredients, products, orders] = await Promise.all([
-        dataService.getIngredientes(),
-        dataService.getProdutos(),
-        dataService.getPedidos()
-      ]);
-
-      // 1. Estoque Crítico
-      const stockCount = ingredients.filter(i => (i.estoque_atual || 0) <= (i.estoque_minimo || 0)).length;
-      setCriticalStockCount(stockCount);
-
-      // 2. Integridade de Produtos
-      const integrityIssues = products
-        .map(p => ({ product: p, errors: validateProductIntegrity(p) }))
-        .filter(item => item.errors.length > 0);
-      setIntegrityIssues(integrityIssues);
-
-      // 3. Pedidos Abertos (Status diferente de Concluído e Cancelado)
-      const openCount = orders.filter(o => o.status !== 'Concluído' && o.status !== 'Cancelado').length;
-      setOpenOrdersCount(openCount);
-
-    } catch (err) {
-      console.error('Erro ao buscar dados de notificação:', err);
-    }
-  }, []);
-
-  React.useEffect(() => {
-    Promise.resolve().then(() => fetchNotificationData());
-    // Refresh every 5 minutes
-    const interval = window.setInterval(fetchNotificationData, 5 * 60 * 1000);
-    return () => window.clearInterval(interval);
-  }, [fetchNotificationData]);
+  const {
+    criticalStockCount = 0,
+    integrityIssues = [],
+    openOrdersCount = 0
+  } = notifications || {};
 
   const handleGlobalRecalculate = async () => {
     if (isRecalculating) return;
@@ -108,9 +78,6 @@ export const Layout = () => {
       
       // Invalida todos os caches do React Query
       queryClient.invalidateQueries();
-      
-      // Atualiza os contadores das notificações
-      await fetchNotificationData();
       
       toast.success('Sincronização concluída com sucesso! ✨', { id: loadingToast });
     } catch (error: unknown) {

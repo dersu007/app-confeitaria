@@ -17,7 +17,8 @@ import {
   calculateUnitCost,
   resolveProductMargin,
   calculateProductPricing,
-  sanitizeProductUpdate
+  sanitizeProductUpdate,
+  convertToStandardUnit
 } from './bakeryService';
 
 import { DEFAULT_CUSTO_HORA } from '../constants';
@@ -537,9 +538,9 @@ class DataService {
         });
       });
 
-      // 3. Save all stock reductions
+      // 3. Save all stock reductions using the dedicated method to ensure balance updates
       if (movimentacoes.length > 0) {
-        await supabase.from('movimentacoes_estoque').insert(movimentacoes);
+        await Promise.all(movimentacoes.map(mov => this.saveMovimentacaoEstoque(mov)));
       }
     } catch (err) {
       console.error('[Stock Error] Falha ao processar baixa automática:', err);
@@ -706,13 +707,65 @@ class DataService {
   }
 
   async saveMovimentacaoEstoque(movimentacao: Partial<MovimentacaoEstoque>): Promise<MovimentacaoEstoque> {
+    // 1. Fetch insumo to get current values and units
+    const { data: insumo, error: fetchError } = await supabase
+      .from('ingredientes')
+      .select('unidade_embalagem, estoque_atual, user_id')
+      .eq('id', movimentacao.insumo_id)
+      .single();
+
+    if (fetchError) {
+      console.error('Erro ao buscar insumo:', fetchError);
+      throw new Error(`Erro ao buscar insumo: ${fetchError.message}`);
+    }
+
+    let finalQty = Number(movimentacao.quantidade) || 0;
+    
+    // Automatic conversion if it's an entry (Task 1)
+    if (movimentacao.tipo === 'entrada' && insumo) {
+      finalQty = convertToStandardUnit(finalQty, insumo.unidade_embalagem);
+    }
+
+    // 2. Insert movement with final quantity
+    // We sanitize the object to avoid spreading circular or non-DB fields
+    const { data: { user } } = await supabase.auth.getUser();
+    const movementToInsert = {
+      insumo_id: movimentacao.insumo_id,
+      quantidade: finalQty,
+      tipo: movimentacao.tipo,
+      origem: movimentacao.origem,
+      pedido_id: movimentacao.pedido_id || null,
+      user_id: movimentacao.user_id || insumo.user_id || user?.id
+    };
+
     const { data, error } = await supabase
       .from('movimentacoes_estoque')
-      .insert(movimentacao)
+      .insert(movementToInsert)
       .select('*, insumo:ingredientes!insumo_id(*)')
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error('Erro Supabase (Insert Movimentação):', error);
+      throw new Error(`Detalhamento: ${error.message}${error.details ? ' - ' + error.details : ''}`);
+    }
+
+    // 3. Update active balance in ingredientes table (Somatório Sagrado)
+    // Note: If you have the trg_sync_ingredient_stock trigger active in DB,
+    // this manual update is redundant, but we keep it for consistency if triggers are not installed.
+    const currentStock = insumo.estoque_atual || 0;
+    const newStock = (movimentacao.tipo === 'entrada') 
+      ? currentStock + finalQty 
+      : currentStock - finalQty;
+
+    const { error: updateError } = await supabase.from('ingredientes').update({ 
+      estoque_atual: newStock,
+      data_atualizacao: new Date().toISOString()
+    }).eq('id', movimentacao.insumo_id);
+
+    if (updateError) {
+      console.warn('Alerta: Movimentação registrada mas falha ao atualizar saldo total. Verifique triggers no banco.', updateError);
+    }
+
     return data;
   }
 

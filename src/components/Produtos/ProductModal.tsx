@@ -60,6 +60,29 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
 
   const formValues = watch();
 
+  const fetchIngredientsCost = React.useCallback(async () => {
+    if (!produto?.id) return;
+    try {
+      const data = await dataService.getProdutoIngredientes(produto.id);
+      if (data) {
+        const total = data.reduce((acc, item) => acc + (item.custo_calculado || 0), 0);
+        setCustoInsumos(total);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar custo de ingredientes:', error);
+    }
+  }, [produto?.id]);
+
+  const fetchData = React.useCallback(async () => {
+    try {
+      const data = await dataService.getCategorias();
+      setCategorias(data || []);
+    } catch (error) {
+      console.error('Erro ao buscar categorias:', error);
+      setCategorias([]);
+    }
+  }, []);
+
   useEffect(() => {
     fetchData();
     if (produto?.id) {
@@ -90,29 +113,6 @@ export const ProductModal = ({ produto, onClose, onSave, onDelete }: ProductModa
       setProductToEditState(produto);
     }
   }, [produto, reset]);
-
-  const fetchIngredientsCost = React.useCallback(async () => {
-    if (!produto?.id) return;
-    try {
-      const data = await dataService.getProdutoIngredientes(produto.id);
-      if (data) {
-        const total = data.reduce((acc, item) => acc + (item.custo_calculado || 0), 0);
-        setCustoInsumos(total);
-      }
-    } catch (error) {
-      console.error('Erro ao buscar custo de ingredientes:', error);
-    }
-  }, [produto?.id]);
-
-  const fetchData = React.useCallback(async () => {
-    try {
-      const data = await dataService.getCategorias();
-      setCategorias(data || []);
-    } catch (error) {
-      console.error('Erro ao buscar categorias:', error);
-      setCategorias([]);
-    }
-  }, []);
 
   // Pricing calculations
   const tempoEmHoras = formValues.tempo_producao_unidade === 'minutos' 

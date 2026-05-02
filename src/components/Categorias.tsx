@@ -75,7 +75,7 @@ export const Categorias = () => {
     recalculateEverythingMutation.mutate();
   };
 
-  const categoryColumns = [
+  const categoryColumns = React.useMemo(() => [
     columnHelper.accessor('nome', { header: 'Nome', cell: EditableCell }),
     columnHelper.accessor('margem_padrao', { header: 'Margem Padrão %', cell: EditableCell }),
     columnHelper.accessor('tipo_margem', { 
@@ -94,7 +94,7 @@ export const Categorias = () => {
       header: 'Arquivar', 
       cell: ArchiveCell
     }),
-  ];
+  ], []);
 
   return (
     <div className="space-y-6">
