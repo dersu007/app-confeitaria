@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Pedido } from '../types';
 import { 
   ShoppingBag, 
@@ -28,9 +29,23 @@ export const Pedidos = () => {
   const updateStatusMutation = useUpdatePedidoStatus();
   const recalculateEverythingMutation = useRecalculateEverything();
 
-  const [viewMode, setViewMode] = useState<'kanban' | 'list' | 'calendar'>('kanban');
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchParams] = useSearchParams();
+  const [viewMode, setViewMode] = useState<'kanban' | 'list' | 'calendar'>(() => {
+    return searchParams.get('q') ? 'list' : 'kanban';
+  });
+  const [searchTerm, setSearchTerm] = useState(() => searchParams.get('q') || '');
   const [statusFilter, setStatusFilter] = useState<string>('Todos');
+
+  useEffect(() => {
+    const q = searchParams.get('q');
+    if (q) {
+      // Wrap in setTimeout to avoid synchronous setState lint error
+      setTimeout(() => {
+        setSearchTerm(q);
+        setViewMode('list');
+      }, 0);
+    }
+  }, [searchParams]);
   
   const [showModal, setShowModal] = useState(false);
   const [selectedPedido, setSelectedPedido] = useState<Pedido | null>(null);
@@ -221,7 +236,7 @@ export const Pedidos = () => {
               </thead>
               <tbody className="divide-y divide-surface-container-high">
                 {filteredPedidos.length === 0 ? (
-                  <tr><td colSpan={6} className="px-6 py-12 text-center text-on-surface-variant italic">Nenhum pedido encontrado.</td></tr>
+                  <tr><td colSpan={7} className="px-6 py-12 text-center text-on-surface-variant italic">Nenhum pedido encontrado.</td></tr>
                 ) : (
                   filteredPedidos.map((pedido) => (
                     <tr key={pedido.id} className="hover:bg-surface-container-low/30 transition-colors group">

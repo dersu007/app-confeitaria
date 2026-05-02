@@ -17,6 +17,7 @@ import toast from 'react-hot-toast';
 import { formatCurrency, calculateUnitCost } from '../../services/bakeryService';
 import { useClientes, useProdutos, useCategoriasExtras, useSaveOrder } from '../../hooks/useQueries';
 import { useAuth } from '../../lib/auth';
+import { dataService } from '../../services/dataService';
 
 interface OrderModalProps {
   pedido?: Pedido | null;
@@ -106,6 +107,22 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
   const totalExtras = extras.reduce((acc, extra) => acc + (Number(extra.valor) || 0), 0);
   const valorTotal = totalProdutos + totalExtras;
 
+  const [isCheckingStock, setIsCheckingStock] = useState(false);
+  const [stockIssues, setStockIssues] = useState<{ nome: string; necessario: number; disponivel: number; unidade: string }[] | null>(null);
+
+  const performSave = (orderData: Partial<Pedido> & { itens: any[], extras: any[] }) => {
+    saveOrderMutation.mutate(orderData, {
+      onSuccess: () => {
+        onSave();
+        toast.success(pedido ? 'Pedido atualizado!' : 'Pedido criado com sucesso!');
+      },
+      onError: (err: Error) => {
+        console.error('Erro ao salvar pedido:', err);
+        toast.error(err.message || 'Erro ao salvar pedido. Verifique o console.');
+      }
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!clienteId) {
@@ -120,33 +137,6 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
     if (!dataEntrega) {
       toast.error('Informe a data de entrega');
       return;
-    }
-
-    // 2. Stock Warning (Non-blocking)
-    const lowStockIngredients: string[] = [];
-    itens.forEach(item => {
-      const product = item.produto;
-      const quantity = Number(item.quantidade) || 0;
-      
-      if (product?.ingredientes) {
-        product.ingredientes.forEach(recipeItem => {
-          const ingredient = recipeItem.ingrediente;
-          if (ingredient) {
-            const totalNeeded = quantity * recipeItem.quantidade;
-            if (ingredient.estoque_atual < totalNeeded) {
-              lowStockIngredients.push(ingredient.nome);
-            }
-          }
-        });
-      }
-    });
-
-    if (lowStockIngredients.length > 0) {
-      const uniqueWarnings = Array.from(new Set(lowStockIngredients));
-      toast.error(
-        `Atenção: Insumo(s) com baixo estoque: ${uniqueWarnings.join(', ')}.`, 
-        { duration: 4000, icon: '⚠️' }
-      );
     }
 
     const orderData = {
@@ -178,23 +168,31 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
       return;
     }
 
-    saveOrderMutation.mutate(orderData, {
-      onSuccess: () => {
-        onSave();
-        toast.success(pedido ? 'Pedido atualizado!' : 'Pedido criado com sucesso!');
-      },
-      onError: (err: unknown) => {
-        console.error('Erro ao salvar pedido:', err);
-        toast.error('Erro ao salvar pedido. Verifique o console.');
+    // Validação de estoque apenas para novos pedidos
+    if (!pedido) {
+      setIsCheckingStock(true);
+      try {
+        const { ok, faltantes } = await dataService.checkStockAvailability(orderData.itens);
+        if (!ok) {
+          setStockIssues(faltantes);
+          setIsCheckingStock(false);
+          return;
+        }
+      } catch (error) {
+        console.error('Erro ao verificar estoque:', error);
+      } finally {
+        setIsCheckingStock(false);
       }
-    });
+    }
+
+    performSave(orderData);
   };
 
   const filteredProducts = produtos.filter(p => 
     p.ativo !== false && p.nome.toLowerCase().includes(productSearch.toLowerCase())
   );
 
-  if (loadingInitial) {
+  if (loadingInitial || isCheckingStock) {
     return (
       <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
         <div className="bg-surface-container-lowest p-8 rounded-3xl flex flex-col items-center gap-4">
@@ -206,7 +204,8 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <>
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-surface-container-lowest w-full max-w-4xl max-h-[90vh] rounded-3xl shadow-2xl overflow-hidden border border-surface-container-high flex flex-col animate-in fade-in zoom-in duration-200">
         <div className="p-6 border-b border-surface-container-high flex justify-between items-center bg-surface-container-low/50">
           <div>
@@ -521,5 +520,79 @@ export const OrderModal = ({ pedido, onClose, onSave }: OrderModalProps) => {
         </div>
       </div>
     </div>
+    
+    {/* Stock Warning Modal Overlay */}
+    {stockIssues && (
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-in fade-in duration-300">
+        <div className="bg-surface-container-lowest max-w-md w-full rounded-[32px] shadow-2xl p-8 border border-error/20 flex flex-col items-center text-center gap-6 animate-in zoom-in-95 duration-300">
+          <div className="w-16 h-16 bg-error/10 text-error rounded-2xl flex items-center justify-center">
+            <Info size={32} />
+          </div>
+          <div>
+            <h3 className="text-xl font-bold text-on-surface mb-2">Estoque Insuficiente</h3>
+            <p className="text-sm text-on-surface-variant">
+              Os seguintes insumos não possuem estoque suficiente para este pedido:
+            </p>
+          </div>
+          
+          <div className="w-full bg-surface-container-low rounded-2xl p-4 space-y-3 max-h-48 overflow-y-auto border border-surface-container-high">
+            {stockIssues.map((issue, idx) => (
+              <div key={idx} className="flex justify-between items-center text-xs">
+                <span className="font-bold text-on-surface">{issue.nome}</span>
+                <span className="text-error font-medium">
+                  Falta: {(issue.necessario - issue.disponivel).toFixed(0)}{issue.unidade}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <p className="text-[11px] text-on-surface-variant leading-relaxed">
+            Deseja salvar o pedido mesmo assim? Você precisará providenciar esses insumos para a produção.
+          </p>
+
+          <div className="flex gap-3 w-full">
+            <button 
+              onClick={() => setStockIssues(null)}
+              className="flex-1 py-3 px-4 bg-surface-container-high text-on-surface font-bold rounded-xl hover:bg-surface-container-highest transition-all"
+            >
+              Voltar
+            </button>
+            <button 
+              onClick={() => {
+                const orderData = {
+                  id: pedido?.id,
+                  user_id: user?.id,
+                  cliente_id: clienteId,
+                  data_pedido: new Date(dataPedido).toISOString(),
+                  status,
+                  prioridade,
+                  observacoes,
+                  data_entrega: new Date(dataEntrega).toISOString(),
+                  valor_total: valorTotal,
+                  itens: itens.map(item => ({
+                    produto_id: item.produto_id!,
+                    quantidade: Number(item.quantidade) || 0,
+                    preco_unitario: Number(item.preco_unitario) || 0,
+                    custo_unitario: Number(item.custo_unitario) || 0,
+                    subtotal: Number(item.subtotal) || 0
+                  })),
+                  extras: extras.map(extra => ({
+                    descricao: extra.descricao!,
+                    categoria: extra.categoria!,
+                    valor: Number(extra.valor) || 0
+                  }))
+                };
+                setStockIssues(null);
+                performSave(orderData);
+              }}
+              className="flex-1 py-3 px-4 bg-primary text-white font-bold rounded-xl hover:bg-primary/90 transition-all shadow-lg shadow-primary/20"
+            >
+              Salvar mesmo assim
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 };

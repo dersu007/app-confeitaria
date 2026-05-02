@@ -96,6 +96,7 @@ export interface Cliente {
 export interface Pedido {
   id: string;
   cliente_id: string;
+  user_id?: string;
   data_pedido: string;
   created_at?: string;
   valor_total: number;

@@ -51,6 +51,18 @@ export const Layout = () => {
   
   const [isRecalculating, setIsRecalculating] = React.useState(false);
   const [showNotifications, setShowNotifications] = React.useState(false);
+  const [searchTerm, setSearchTerm] = React.useState('');
+
+  const handleSearch = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && searchTerm.trim()) {
+      navigate(`/pedidos?q=${encodeURIComponent(searchTerm.trim())}`);
+      setSearchTerm('');
+    }
+  };
+
+  const userInitials = user?.email 
+    ? user.email.split('@')[0].substring(0, 2).toUpperCase() 
+    : 'HS';
 
   const {
     criticalStockCount = 0,
@@ -144,6 +156,9 @@ export const Layout = () => {
               className="bg-transparent border-none focus:ring-0 text-sm w-full placeholder:text-on-surface-variant/60" 
               placeholder="Buscar pedidos ou produtos..." 
               type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              onKeyDown={handleSearch}
             />
           </div>
           
@@ -292,12 +307,8 @@ export const Layout = () => {
                 </p>
                 <p className="text-[10px] text-on-surface-variant">Admin</p>
               </div>
-              <div className="h-10 w-10 rounded-full bg-primary-container overflow-hidden">
-                <img 
-                  alt="Profile" 
-                  src="https://images.unsplash.com/photo-1556157382-97eda2d62296?auto=format&fit=crop&q=80&w=100" 
-                  referrerPolicy="no-referrer"
-                />
+              <div className="h-10 w-10 rounded-full bg-primary-container flex items-center justify-center border border-primary/10">
+                <span className="text-xs font-bold text-primary">{userInitials}</span>
               </div>
             </div>
           </div>

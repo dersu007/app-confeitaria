@@ -391,6 +391,27 @@ class DataService {
   }
 
   async updatePedidoStatus(pedidoId: string, status: Pedido['status']): Promise<void> {
+    // 1. Buscar status atual
+    const { data: currentPedido, error: fetchError } = await supabase
+      .from('pedidos')
+      .select('status, user_id')
+      .eq('id', pedidoId)
+      .single();
+    
+    if (fetchError) throw fetchError;
+
+    const oldStatus = currentPedido.status;
+
+    // 2. Lógica de reversão/baixa de estoque
+    if (status === 'Cancelado' && oldStatus !== 'Cancelado') {
+      // Estornar estoque se está cancelando agora
+      await this.reverseOrderStock(pedidoId);
+    } else if (oldStatus === 'Cancelado' && status !== 'Cancelado') {
+      // Baixar estoque novamente se está reativando um pedido cancelado
+      await this.processOrderStock(pedidoId, currentPedido.user_id);
+    }
+
+    // 3. Atualizar status no banco
     const { error } = await supabase
       .from('pedidos')
       .update({ status })
@@ -402,19 +423,8 @@ class DataService {
   async savePedido(pedido: Partial<Pedido>): Promise<Pedido> {
     const { itens, extras, cliente: _cliente, ...pedidoData } = pedido as Record<string, unknown>;
     
-    // Sanitize pedidoData to only include actual database columns
     const sanitizedPedido: Record<string, unknown> = {};
-    const allowedFields = [
-      'id', 
-      'cliente_id', 
-      'data_pedido', 
-      'valor_total', 
-      'status', 
-      'prioridade', 
-      'data_entrega', 
-      'observacoes',
-      'user_id' 
-    ];
+    const allowedFields = ['id', 'cliente_id', 'data_pedido', 'valor_total', 'status', 'prioridade', 'data_entrega', 'observacoes', 'user_id'];
     
     allowedFields.forEach(field => {
       if (pedidoData[field] !== undefined && pedidoData[field] !== null) {
@@ -423,35 +433,22 @@ class DataService {
     });
 
     let savedPedido: Pedido;
+    const isNew = !sanitizedPedido.id;
     
-    try {
-      if (sanitizedPedido.id) {
-        const { data, error } = await supabase
-          .from('pedidos')
-          .update(sanitizedPedido)
-          .eq('id', sanitizedPedido.id)
-          .select()
-          .single();
-        if (error) throw error;
-        savedPedido = data;
-      } else {
-        const { data, error } = await supabase
-          .from('pedidos')
-          .insert(sanitizedPedido)
-          .select()
-          .single();
-        if (error) throw error;
-        savedPedido = data;
-      }
+    if (isNew) {
+      const { data, error } = await supabase.from('pedidos').insert(sanitizedPedido).select().single();
+      if (error) throw error;
+      savedPedido = data;
+    } else {
+      const { data, error } = await supabase.from('pedidos').update(sanitizedPedido).eq('id', sanitizedPedido.id).select().single();
+      if (error) throw error;
+      savedPedido = data;
+    }
 
-      // Handle items if provided
+    try {
+      // Handle items
       if (itens) {
-        // 1. Remove old items if we're updating
-        if (sanitizedPedido.id) {
-          await this.deletePedidoItens(sanitizedPedido.id);
-        }
-        
-        // 2. Insert new items if there are any
+        if (!isNew) await this.deletePedidoItens(savedPedido.id);
         if (itens.length > 0) {
           const processedItens = (itens as Record<string, unknown>[]).map(it => ({
             pedido_id: savedPedido.id,
@@ -465,14 +462,9 @@ class DataService {
         }
       }
 
-      // Handle extras if provided
+      // Handle extras
       if (extras) {
-        // 1. Remove old extras if we're updating
-        if (sanitizedPedido.id) {
-          await this.deletePedidoExtras(sanitizedPedido.id as string);
-        }
-        
-        // 2. Insert new extras if there are any
+        if (!isNew) await this.deletePedidoExtras(savedPedido.id);
         if (extras.length > 0) {
           const processedExtras = (extras as Record<string, unknown>[]).map(ex => ({
             pedido_id: savedPedido.id,
@@ -484,68 +476,122 @@ class DataService {
         }
       }
 
-      // 3. Automatic stock reduction for NEW orders
-      if (!sanitizedPedido.id) {
+      // Baixa de estoque apenas para novos pedidos
+      if (isNew) {
         await this.processOrderStock(savedPedido.id, savedPedido.user_id);
       }
 
       return savedPedido;
     } catch (err: unknown) {
-      console.error('[Supabase Error] Falha ao salvar pedido completo:', err);
-      throw err;
+      // Compensating transaction: if it's a new order and something failed, cleanup the order shell
+      const error = err as Error;
+      if (isNew) {
+        console.error('Falha ao processar pedido completo, realizando rollback manual...', error);
+        await supabase.from('pedidos').delete().eq('id', savedPedido.id);
+      }
+      throw new Error(`Erro ao salvar pedido: ${error.message || 'Erro desconhecido'}`);
     }
   }
 
   async processOrderStock(pedidoId: string, userId?: string): Promise<void> {
-    try {
-      // 1. Fetch order items with their products and technical sheets
-      const { data: items, error: itemsError } = await supabase
-        .from('pedidos_itens')
-        .select(`
-          quantidade,
-          produto:produtos(
-            id,
-            user_id,
-            ingredientes:produto_ingredientes(
-              ingrediente_id,
-              quantidade
-            )
+    const { data: items, error: itemsError } = await supabase
+      .from('pedidos_itens')
+      .select(`
+        quantidade,
+        produto:produtos(
+          id,
+          user_id,
+          ingredientes:produto_ingredientes(
+            ingrediente_id,
+            quantidade
           )
-        `)
-        .eq('pedido_id', pedidoId);
+        )
+      `)
+      .eq('pedido_id', pedidoId);
 
-      if (itemsError) throw itemsError;
-      if (!items || items.length === 0) return;
+    if (itemsError) throw itemsError;
+    if (!items || items.length === 0) return;
 
-      const movimentacoes: Partial<MovimentacaoEstoque>[] = [];
+    const movimentacoes: Partial<MovimentacaoEstoque>[] = [];
 
-      // 2. Iterate through products and explode their technical sheet
-      items.forEach((item: Record<string, unknown>) => {
-        const orderQty = item.quantidade as number;
-        const recipeItems = ((item.produto as Record<string, unknown>)?.ingredientes as Record<string, unknown>[]) || [];
-        const productUserId = ((item.produto as Record<string, unknown>)?.user_id as string) || userId;
+    items.forEach((item: any) => {
+      const orderQty = item.quantidade;
+      const recipeItems = item.produto?.ingredientes || [];
+      const productUserId = item.produto?.user_id || userId;
 
-        recipeItems.forEach((recipe: Record<string, unknown>) => {
-          const reductionQty = orderQty * (recipe.quantidade as number);
-          movimentacoes.push({
-            insumo_id: recipe.ingrediente_id as string,
-            quantidade: reductionQty,
-            tipo: 'saida',
-            origem: 'venda_produto',
-            pedido_id: pedidoId,
-            user_id: productUserId
-          });
+      recipeItems.forEach((recipe: any) => {
+        const reductionQty = orderQty * recipe.quantidade;
+        movimentacoes.push({
+          insumo_id: recipe.ingrediente_id,
+          quantidade: reductionQty,
+          tipo: 'saida',
+          origem: 'venda_produto',
+          pedido_id: pedidoId,
+          user_id: productUserId
         });
       });
+    });
 
-      // 3. Save all stock reductions using the dedicated method to ensure balance updates
-      if (movimentacoes.length > 0) {
-        await Promise.all(movimentacoes.map(mov => this.saveMovimentacaoEstoque(mov)));
-      }
-    } catch (err) {
-      console.error('[Stock Error] Falha ao processar baixa automática:', err);
-      // We don't throw here to avoid blocking the order flow as requested
+    if (movimentacoes.length > 0) {
+      // Aqui usamos insert em massa para ser atômico e disparar o trigger N vezes corretamente
+      const { error } = await supabase.from('movimentacoes_estoque').insert(movimentacoes);
+      if (error) throw error;
     }
+  }
+
+  async reverseOrderStock(pedidoId: string): Promise<void> {
+    const { error } = await supabase
+      .from('movimentacoes_estoque')
+      .delete()
+      .eq('pedido_id', pedidoId)
+      .eq('origem', 'venda_produto');
+    
+    if (error) throw error;
+  }
+
+  async checkStockAvailability(itens: Partial<PedidoItem>[]): Promise<{ ok: boolean; faltantes: { nome: string; necessario: number; disponivel: number; unidade: string }[] }> {
+    const faltantes: { nome: string; necessario: number; disponivel: number; unidade: string }[] = [];
+    const necessidade: Record<string, number> = {};
+
+    // 1. Calcular necessidade total de insumos
+    for (const item of itens) {
+      if (!item.produto_id || !item.quantidade) continue;
+      
+      const recipe = await this.getProdutoIngredientes(item.produto_id);
+      for (const ingredient of recipe) {
+        const totalNeeded = (Number(item.quantidade) || 0) * (Number(ingredient.quantidade) || 0);
+        necessidade[ingredient.ingrediente_id] = (necessidade[ingredient.ingrediente_id] || 0) + totalNeeded;
+      }
+    }
+
+    // 2. Comparar com estoque atual
+    const ingredientIds = Object.keys(necessidade);
+    if (ingredientIds.length === 0) return { ok: true, faltantes: [] };
+
+    const { data: ingredients, error } = await supabase
+      .from('ingredientes')
+      .select('id, nome, estoque_atual, unidade_base')
+      .in('id', ingredientIds);
+
+    if (error) throw error;
+
+    ingredients.forEach(ing => {
+      const needed = necessidade[ing.id];
+      const avail = Number(ing.estoque_atual) || 0;
+      if (avail < needed) {
+        faltantes.push({
+          nome: ing.nome,
+          necessario: needed,
+          disponivel: avail,
+          unidade: ing.unidade_base
+        });
+      }
+    });
+
+    return {
+      ok: faltantes.length === 0,
+      faltantes
+    };
   }
 
   // --- Despesas Fixas ---
@@ -707,10 +753,9 @@ class DataService {
   }
 
   async saveMovimentacaoEstoque(movimentacao: Partial<MovimentacaoEstoque>): Promise<MovimentacaoEstoque> {
-    // 1. Fetch insumo to get current values and units
     const { data: insumo, error: fetchError } = await supabase
       .from('ingredientes')
-      .select('unidade_embalagem, estoque_atual, user_id')
+      .select('unidade_embalagem, user_id')
       .eq('id', movimentacao.insumo_id)
       .single();
 
@@ -721,13 +766,13 @@ class DataService {
 
     let finalQty = Number(movimentacao.quantidade) || 0;
     
-    // Automatic conversion if it's an entry (Task 1)
-    if (movimentacao.tipo === 'entrada' && insumo) {
+    // Converte se for origem manual ou compra (entrada ou saída manual)
+    // Para venda_produto não converte pois já vem na unidade base
+    const shouldConvert = movimentacao.origem === 'ajuste_manual' || movimentacao.origem === 'compra';
+    if (shouldConvert && insumo) {
       finalQty = convertToStandardUnit(finalQty, insumo.unidade_embalagem);
     }
 
-    // 2. Insert movement with final quantity
-    // We sanitize the object to avoid spreading circular or non-DB fields
     const { data: { user } } = await supabase.auth.getUser();
     const movementToInsert = {
       insumo_id: movimentacao.insumo_id,
@@ -746,26 +791,10 @@ class DataService {
 
     if (error) {
       console.error('Erro Supabase (Insert Movimentação):', error);
-      throw new Error(`Detalhamento: ${error.message}${error.details ? ' - ' + error.details : ''}`);
+      throw new Error(`Detalhamento: ${error.message}`);
     }
 
-    // 3. Update active balance in ingredientes table (Somatório Sagrado)
-    // Note: If you have the trg_sync_ingredient_stock trigger active in DB,
-    // this manual update is redundant, but we keep it for consistency if triggers are not installed.
-    const currentStock = insumo.estoque_atual || 0;
-    const newStock = (movimentacao.tipo === 'entrada') 
-      ? currentStock + finalQty 
-      : currentStock - finalQty;
-
-    const { error: updateError } = await supabase.from('ingredientes').update({ 
-      estoque_atual: newStock,
-      data_atualizacao: new Date().toISOString()
-    }).eq('id', movimentacao.insumo_id);
-
-    if (updateError) {
-      console.warn('Alerta: Movimentação registrada mas falha ao atualizar saldo total. Verifique triggers no banco.', updateError);
-    }
-
+    // REMOVIDO: update manual do estoque. O trigger trg_sync_ingredient_stock cuida disso.
     return data;
   }
 

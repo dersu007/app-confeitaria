@@ -250,7 +250,10 @@ export const validateProductIntegrity = (product: Partial<Produto>): string[] =>
   }
 
   if ((product.margem_real_calculada ?? 0) <= 0) {
-    errors.push("Margem de lucro negativa ou zero");
+    const hasIngredients = (product.ingredientes && product.ingredientes.length > 0) || (Number(product.custo_total) > 0);
+    if (hasIngredients) {
+      errors.push("Margem de lucro negativa ou zero");
+    }
   }
 
   if (!product.ingredientes || product.ingredientes.length === 0) {

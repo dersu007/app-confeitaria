@@ -11,6 +11,7 @@ import { Produtos } from './components/Produtos';
 import { Precificacao } from './components/Precificacao';
 import { Estoque } from './components/Estoque';
 import { Toaster } from 'react-hot-toast';
+import { Package, Info } from 'lucide-react';
 import { Login } from './components/Login';
 import { Register } from './components/Register';
 import { ResetPassword } from './components/ResetPassword';
@@ -43,6 +44,28 @@ export default function App() {
             <Route path="produtos" element={<Produtos />} />
             <Route path="precificacao" element={<Precificacao />} />
             <Route path="estoque" element={<Estoque />} />
+            <Route path="ia" element={
+              <div className="flex flex-col items-center justify-center h-[60vh] text-on-surface-variant gap-4">
+                <div className="p-4 bg-primary/10 text-primary rounded-full">
+                  <Package size={48} />
+                </div>
+                <div className="text-center">
+                  <h2 className="text-2xl font-bold mb-1 text-on-surface">Assistente IA</h2>
+                  <p>Funcionalidade em desenvolvimento. Em breve você poderá gerenciar sua confeitaria com inteligência artificial.</p>
+                </div>
+              </div>
+            } />
+            <Route path="configuracoes" element={
+              <div className="flex flex-col items-center justify-center h-[60vh] text-on-surface-variant gap-4">
+                <div className="p-4 bg-primary/10 text-primary rounded-full">
+                  <Info size={48} />
+                </div>
+                <div className="text-center">
+                  <h2 className="text-2xl font-bold mb-1 text-on-surface">Configurações</h2>
+                  <p>Em breve você poderá ajustar as preferências do Honey Sugar aqui.</p>
+                </div>
+              </div>
+            } />
             <Route path="*" element={
               <div className="flex flex-col items-center justify-center h-[60vh] text-on-surface-variant">
                 <h2 className="text-2xl font-bold mb-2">Página em Construção</h2>
